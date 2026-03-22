@@ -332,6 +332,17 @@ On iOS, the app's documents directory is backed up to iCloud by default. A colle
 
 Use `getApplicationSupportDirectory()` instead of `getApplicationDocumentsDirectory()` for measurement storage — the support directory is excluded from iCloud backup by default on iOS. If the documents directory must be used for any reason, apply the `com.apple.MobileBackup` xattr to the `measurements/` folder at creation time.
 
+#### Apple Privacy Manifest (`PrivacyInfo.xcprivacy`)
+
+Since May 2024, App Store Connect rejects binaries that call "required reason" APIs without a privacy manifest declaring the reason codes. This app will call at least two such API categories:
+
+| API category | Usage | Required reason code |
+|---|---|---|
+| `UserDefaults` | `SharedPreferences` for `DeviceConfig` and `onboardingComplete` | `CA92.1` (app functionality) |
+| File timestamp APIs | Calibration age check (`ChainCalibration` timestamp) | `C617.1` (app functionality) |
+
+Add a `PrivacyInfo.xcprivacy` file to both `macos/Runner/` and `ios/Runner/` declaring each accessed API and its reason code. Without this file, both TestFlight upload and App Store submission fail at the binary validation step — it cannot be added retroactively after build.
+
 ---
 
 ### Audio
@@ -371,6 +382,15 @@ Without subscribing to device change events, the state machine will hang or prod
 - **iOS:** `AVAudioSession.routeChangeNotification` with reason `oldDeviceUnavailable`
 
 On receipt, check whether the active device UID is still present. If not, cancel the current capture and transition to `DeviceError`.
+
+#### WASAPI Mode — Exclusive vs Shared (Windows)
+
+In WASAPI shared mode, the Windows Audio Session API routes audio through the OS audio engine, which may resample to the system mix format. If the mix rate differs from 48 kHz (e.g. 44.1 kHz or 96 kHz), every frequency in the measurement is shifted proportionally — a systematic error with no obvious warning.
+
+The Windows plugin must request WASAPI exclusive mode at 48 kHz / 24-bit:
+- In exclusive mode, the app owns the device directly and the OS does not resample
+- If the device is already held in exclusive mode by another app, `AUDCLNT_E_DEVICE_IN_USE` is returned — surface this as a `DeviceError` with instructions to close the conflicting app
+- Shared mode is not acceptable for this application and must not be used as a fallback
 
 ---
 
@@ -443,6 +463,28 @@ If the user changes sweep parameters between sessions (e.g. extends duration fro
 > "This measurement used different sweep settings and may not be directly comparable."
 
 Allow the user to proceed with explicit acknowledgement.
+
+#### Pickup Entity Model
+
+Currently `Measurement` records are flat and unconnected — each is an island with a free-text `pickupLabel` string. A user measuring the same pickup ten times across multiple sessions has no way to group them, track drift over time, or compare before/after wax potting. This data model decision is harder to retrofit after the History screen is built.
+
+Introduce a lightweight `Pickup` entity in Phase 0 alongside `Measurement`:
+
+```
+Pickup
+  id: UUID
+  name: String          # e.g. "PAF neck", "Strat bridge 2024"
+  notes: String?
+  createdAt: DateTime
+  measurementIds: List<UUID>
+```
+
+- `Measurement` gains an optional `pickupId` foreign key
+- `PickupRepository` handles CRUD with atomic writes
+- History screen gains a "by pickup" grouping view alongside the existing flat list
+- A pickup can exist with zero measurements (created before the first measurement session)
+
+The `Pickup` entity does not affect the DSP pipeline or calibration — it is a pure data layer addition.
 
 ---
 
@@ -541,6 +583,27 @@ jobs:
 
 The hardware integration test (Phase 3) cannot run in CI — document it as a manual pre-release gate: run against a reference pickup, assert reported resonance frequency is within ±50 Hz of a known ground truth value established from REW or Pickup Wizard.
 
+#### macOS Notarization
+
+The Distribution phase targets `.dmg` for direct distribution, but an un-notarized `.dmg` is blocked by Gatekeeper for all users who have not explicitly disabled it — which is effectively all users outside of development.
+
+Requirements:
+- **Developer ID Application** certificate in the build keychain
+- **Hardened Runtime** enabled in Xcode signing settings (`ENABLE_HARDENED_RUNTIME = YES`)
+- All entitlements must be compatible with hardened runtime (the existing `audio-input` and `usb` entitlements are)
+- Add a notarization step to the CI/CD pipeline after `flutter build macos --release`:
+
+```yaml
+- run: xcrun notarytool submit build/macos/Build/Products/Release/WtFK.app
+         --apple-id ${{ secrets.APPLE_ID }}
+         --team-id ${{ secrets.TEAM_ID }}
+         --password ${{ secrets.APP_SPECIFIC_PASSWORD }}
+         --wait
+- run: xcrun stapler staple build/macos/Build/Products/Release/WtFK.app
+```
+
+Without notarization, the `.dmg` distribution is limited to users who know how to bypass Gatekeeper — which excludes the non-technical audience this app targets.
+
 ---
 
 ### Testing
@@ -597,6 +660,10 @@ Pin to the minimum version that supports all language features and packages used
 | Sweep output clipping | Step 0 of `Armed` state: 1s clipping check before every full sweep |
 | Measurement traceability | `hardware` block in `Measurement` JSON; `calibrationId` UUID links each result to its calibration |
 | `fftea` package abandonment | `FftProvider` abstraction; `AccelerateFftProvider` swap-in requires no changes outside `fft_provider.dart` |
+| App Store binary rejected for missing privacy declarations | `PrivacyInfo.xcprivacy` in macOS and iOS targets; declare `UserDefaults` and file timestamp API reason codes |
+| Windows OS resampling corrupts frequency accuracy | WASAPI exclusive mode at 48 kHz/24-bit; `AUDCLNT_E_DEVICE_IN_USE` → `DeviceError`; shared mode not permitted |
+| Flat measurement records hide per-pickup history | `Pickup` entity with `measurementIds`; `PickupRepository`; History screen grouped-by-pickup view |
+| Un-notarized `.dmg` blocked by Gatekeeper | Developer ID cert + hardened runtime + `xcrun notarytool` + `xcrun stapler` in CI pipeline |
 
 ---
 
@@ -627,8 +694,10 @@ lib/
   data/
     measurement_repository.dart           # Atomic writes via write-then-rename
     measurement_migrator.dart             # Schema version migration
+    pickup_repository.dart                # Pickup entity CRUD with atomic writes
     models/
-      measurement.dart                    # schemaVersion + hardware metadata + all result fields
+      measurement.dart                    # schemaVersion + hardware metadata + pickupId + all result fields
+      pickup.dart                         # Pickup entity: id, name, notes, createdAt, measurementIds
   ui/
     screens/
       onboarding_screen.dart              # Linear first-launch flow; blocks until calibration complete
@@ -656,6 +725,8 @@ lib/
   main.dart
 
 macos/
+  Runner/
+    PrivacyInfo.xcprivacy                 # Required reason API declarations (UserDefaults, file timestamps)
   Classes/
     AudioEnginePlugin.swift
     AudioDeviceEnumerator.swift
@@ -663,6 +734,8 @@ macos/
     InputCapture.swift
 
 ios/
+  Runner/
+    PrivacyInfo.xcprivacy                 # Required reason API declarations (UserDefaults, file timestamps)
   Classes/
     AudioEnginePlugin.swift               # Shared implementation with macOS (Tier 2)
 
@@ -698,14 +771,14 @@ test/
 
 | Phase | Work | Duration |
 |---|---|---|
-| **0 — Scaffold** | Project structure; mock platform plugin (synthetic 4 kHz resonance); all screens wired to mock data; `MeasurementMigrator` with `schemaVersion` + hardware metadata fields; persistent `DspWorker` stub with busy/cancel; `FftProvider` abstraction; atomic file write helper; `AppLocalizations` wired with `app_en.arb`; `app_theme.dart` with light + dark themes; SDK version constraints in `pubspec.yaml`; CI pipeline (GitHub Actions: test + analyze + build macOS) | 1 week |
+| **0 — Scaffold** | Project structure; mock platform plugin (synthetic 4 kHz resonance); all screens wired to mock data; `MeasurementMigrator` with `schemaVersion` + hardware metadata fields; `Pickup` entity + `PickupRepository`; persistent `DspWorker` stub with busy/cancel; `FftProvider` abstraction; atomic file write helper; `AppLocalizations` wired with `app_en.arb`; `app_theme.dart` with light + dark themes; SDK version constraints in `pubspec.yaml`; `PrivacyInfo.xcprivacy` stubs in macOS and iOS targets; CI pipeline (GitHub Actions: test + analyze + build macOS) | 1 week |
 | **1 — DSP Engine** | `LogSineSweep` + inverse filter; `DspPipelineService` (deconvolution, chain correction, Tikhonov regularization, configurable search band, all-peaks detection); `FftProvider` benchmark (fftea vs Accelerate); unit tests against synthetic 4 kHz Q=3 pickup model | 1–2 weeks |
 | **2 — Calibration** | `CalibrationService` (chain calibration flow, `H_chain` storage, atomic writes, invalidation rules, `calibrationId` UUID); level check tool; sweep clipping check; mains frequency measurement tool; onboarding flow; `CalibrationExpiryBanner`; Measure screen blocked state; iCloud backup exclusion for measurement storage | 1–2 weeks |
 | **3 — Audio Plugin** | macOS entitlements (`audio-input` + `usb`); Swift `AVAudioEngine` plugin (native buffer capture, single `MethodChannel` transfer); `AVAudioTime` co-start; sample rate negotiation; USB hot-plug detection; audio session interruption + `AppBackgrounded` handling; app lifecycle notifications; cross-correlation alignment check; dropout detection; golden-ratio sweep spacing; local rotating log file for `FatalError`; end-to-end validation against known pickup (manual gate: ±50 Hz of REW reference) | 2–3 weeks |
 | **4 — UI & Persistence** | History screen; CSV export; `ResonanceSearchBand` UI; all-peaks chart annotation; cursor inverse transform; `sweepConfig` comparability guard; `Semantics` accessibility wrappers; spectral hum suppression toggle; memory management (discard raw buffers post-pipeline); widget tests; app polish | 1–2 weeks |
-| **5 — Windows** | WASAPI backend; Windows USB device change notification for hot-plug; sample rate negotiation; minimum Windows 10 build 19041 target | 1–2 weeks |
+| **5 — Windows** | WASAPI exclusive mode backend (48 kHz/24-bit; `AUDCLNT_E_DEVICE_IN_USE` → `DeviceError`); Windows USB device change notification for hot-plug; sample rate negotiation; minimum Windows 10 build 19041 target | 1–2 weeks |
 | **6 — iOS** | AVAudioEngine iOS backend; `NSMicrophoneUsageDescription`; app lifecycle background handling; minimum iOS 16.0 target; Camera Connection Kit USB class 2 compatibility matrix testing | 1–2 weeks |
-| **7 — Distribution** | macOS .dmg (direct); iOS TestFlight → App Store | — |
+| **7 — Distribution** | macOS: Developer ID signing + hardened runtime + notarization (`xcrun notarytool` + `xcrun stapler`) + `.dmg` packaging; iOS: `PrivacyInfo.xcprivacy` final review + TestFlight → App Store | — |
 
 > **Note on Mac App Store:** Sandboxing may complicate USB audio device access. Direct distribution via .dmg is recommended for initial release.
 
