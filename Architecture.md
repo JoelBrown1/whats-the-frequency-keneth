@@ -111,7 +111,7 @@ The full signal chain (headphone amp + exciter coil) has its own frequency-depen
 1. Replace the pickup with a known resistive load (10 kΩ) at the coil position
 2. Run a full log-sine sweep; capture `Y_ref(f)`
 3. Compute chain response: `H_chain(f) = Y_ref(f) / X(f)`
-4. Store `H_chain(f)` with timestamp in `DeviceConfig`
+4. Store `H_chain(f)` with timestamp and a UUID `calibrationId` in `DeviceConfig`
 
 During pickup measurement, the chain response is divided out:
 
@@ -161,11 +161,13 @@ Error types:
 
 | Type | Examples | Recovery |
 |---|---|---|
-| `RecoverableError` | Dropout, level too low, sweep misaligned | Prompt retry → back to `Armed` |
+| `RecoverableError` | Dropout, level too low, sweep misaligned, output clipping, `AppBackgrounded`, `Interrupted` | Prompt retry → back to `Armed` |
 | `DeviceError` | Device disconnected, sample rate mismatch | Prompt reconnect → back to `Idle` |
 | `FatalError` | Plugin crash, OOM | Log diagnostic, require app restart |
 
 Capture flow:
+
+0. **Sweep clipping check:** play a 1-second excerpt of the sweep at maximum amplitude and capture on input channel 1; if any sample exceeds -1 dBFS, abort with `RecoverableError` — prompt the user to turn the headphone knob down slightly and recalibrate
 1. Pre-roll silence (512 ms) to flush interface buffers
 2. Schedule playback and input tap to start on the same `AVAudioTime` render cycle (sample-accurate co-start)
 3. Stop after sweep duration + post-roll (500 ms)
@@ -178,6 +180,7 @@ Dropout detection is mandatory — USB audio devices can glitch. The app must wa
 **Hum mitigation (N ≥ 4 sweeps):** Use golden-ratio sweep spacing to cancel mains harmonics across the average:
 
 ```dart
+// powerLineHz is the measured value from DeviceConfig, not a nominal constant
 final td = (1 / powerLineHz) / goldenRatio; // ~12.4 ms for 50 Hz
 final pauseBetweenSweeps = 1000 + (td * 1000).round(); // ms
 ```
@@ -219,7 +222,7 @@ Pipeline steps:
 
 FFT size: zero-pad 144,000 samples to 2^18 = 262,144 → ~1.8 Hz frequency resolution.
 
-If `fftea` performance is insufficient on target hardware, fall back to native Accelerate framework (Apple) via platform channel.
+Swap to `AccelerateFftProvider` via the `FftProvider` abstraction if `fftea` performance is insufficient — no changes outside `fft_provider.dart` are needed.
 
 **Spectral hum suppression (optional, user-configurable):** interpolate linearly across ±10 bins around each of the first 39 mains harmonics before peak detection.
 
@@ -250,7 +253,19 @@ double chartXToFrequency(double chartX, double chartWidth) {
 - CSV export: `(frequency_hz, magnitude_db)` per measurement — compatible with REW, MATLAB, Excel
 
 **Measurement JSON fields:**
-`schemaVersion`, `id`, `timestamp`, `pickupLabel`, `sweepConfig`, `resonanceSearchBand`, `frequencyBins[]`, `magnitudeDB[]`, `resonanceFrequencyHz`, `qFactor`
+`schemaVersion`, `id`, `timestamp`, `pickupLabel`, `sweepConfig`, `resonanceSearchBand`, `frequencyBins[]`, `magnitudeDB[]`, `resonanceFrequencyHz`, `qFactor`, `hardware` (interface device name, interface UID, calibration ID, calibration timestamp)
+
+**Hardware metadata block:**
+```json
+{
+  "hardware": {
+    "interfaceDeviceName": "Scarlett 2i2 USB",
+    "interfaceUID": "AppleUSBAudioEngine:...",
+    "calibrationId": "<uuid>",
+    "calibrationTimestamp": "2026-03-21T10:32:00Z"
+  }
+}
+```
 
 **Schema migration:**
 
@@ -267,9 +282,11 @@ class MeasurementMigrator {
 
 ---
 
-## Additional Considerations
+## Considerations
 
-### 1. Platform Permissions and Entitlements
+### Platform
+
+#### Permissions and Entitlements
 
 Microphone access must be explicitly declared on all Apple platforms — without the correct entitlements the app silently fails to capture audio.
 
@@ -289,9 +306,37 @@ The USB entitlement is required for Core Audio device enumeration under App Sand
 ```
 The App Store will reject the binary without this key.
 
+#### Minimum OS Version Targets
+
+Several APIs in the plan (`AVAudioTime` scheduling, Core Audio device enumeration under App Sandbox) require specific minimum OS versions. Without explicit targets, `flutter build` succeeds but the app may crash on older OS versions in the field.
+
+Define in `pubspec.yaml` and Xcode deployment targets:
+
+| Platform | Minimum | Rationale |
+|---|---|---|
+| macOS | 12.0 (Monterey) | `AVAudioEngine` routing stability; Apple Silicon native builds |
+| iOS | 16.0 | USB audio class 2 reliability via Camera Connection Kit |
+| Windows | 10 (build 19041) | WASAPI exclusive mode; Flutter Windows stable baseline |
+
+#### App Lifecycle and Background Handling
+
+On iOS, the OS suspends audio sessions when the app moves to the background (home button, incoming call UI). If this happens mid-sweep, capture silently stops — dropout detection catches it, but the `RecoverableError` transition must be triggered before the OS kills the audio session.
+
+- Subscribe to `UIApplication.willResignActiveNotification` (iOS) and `NSApplication.willResignActiveNotification` (macOS)
+- On receipt: if state is `Playing` or `Capturing`, immediately abort and transition to `RecoverableError(AppBackgrounded)`
+- On `didBecomeActiveNotification`: re-activate the audio session and offer retry
+
+#### iCloud Backup Exclusion (iOS)
+
+On iOS, the app's documents directory is backed up to iCloud by default. A collection of measurements could meaningfully impact the user's iCloud storage quota.
+
+Use `getApplicationSupportDirectory()` instead of `getApplicationDocumentsDirectory()` for measurement storage — the support directory is excluded from iCloud backup by default on iOS. If the documents directory must be used for any reason, apply the `com.apple.MobileBackup` xattr to the `measurements/` folder at creation time.
+
 ---
 
-### 2. Platform Channel PCM Transfer Strategy
+### Audio
+
+#### PCM Transfer Strategy
 
 Streaming raw PCM from native to Dart via `EventChannel` during capture introduces Flutter codec serialization overhead on every audio buffer callback (~every 10 ms). At audio rates this can cause latency spikes and buffer drops.
 
@@ -304,34 +349,24 @@ func captureComplete(_ samples: [Float]) -> FlutterStandardTypedData {
 }
 ```
 
----
-
-### 3. Audio Session Interruptions
+#### Audio Session Interruptions
 
 Other apps can take audio focus mid-measurement (phone calls, notifications, Spotlight). Without interruption handling, a mid-sweep interruption produces a corrupt capture that may pass dropout detection.
 
-**Required additions:**
 - Subscribe to `AVAudioSession.interruptionNotification` (iOS) and `AVAudioEngine` configuration change notifications (macOS)
-- On interruption: immediately transition to `RecoverableError`, notify the user, offer retry
+- On interruption: immediately transition to `RecoverableError(Interrupted)`, notify the user, offer retry
 - On interruption end: re-activate the audio session before allowing retry
 
-Add `Interrupted` as a `RecoverableError` subtype in the state machine error taxonomy.
-
----
-
-### 4. Sample Rate Negotiation
+#### Sample Rate Negotiation
 
 The app assumes 48 kHz is available. The OS honours whatever sample rate was last set by another app or the device's native rate. If the system is running at 44.1 kHz or 96 kHz the app will capture at the wrong rate, producing a frequency-shifted result with no obvious error.
 
-**Required:** After `AVAudioEngine` starts, verify the active hardware sample rate matches 48 kHz. If it does not, surface a `DeviceError` with an explicit instruction to set the Scarlett 2i2 to 48 kHz in Focusrite Control before retrying. Do not attempt silent sample rate conversion — it adds DSP complexity and the user can fix it in 10 seconds.
+After `AVAudioEngine` starts, verify the active hardware sample rate matches 48 kHz. If it does not, surface a `DeviceError` with an explicit instruction to set the Scarlett 2i2 to 48 kHz in Focusrite Control before retrying. Do not attempt silent sample rate conversion — it adds DSP complexity and the user can fix it in 10 seconds.
 
----
+#### USB Hot-Plug Detection
 
-### 5. USB Hot-Plug Detection
+Without subscribing to device change events, the state machine will hang or produce garbage data if the Scarlett 2i2 is unplugged mid-sweep.
 
-The `DeviceError` state exists but no mechanism is defined for detecting USB disconnection. Without subscribing to device change events, the state machine will hang or produce garbage data if the Scarlett 2i2 is unplugged mid-sweep.
-
-**Required subscriptions:**
 - **macOS:** `AudioObjectAddPropertyListener` on `kAudioHardwarePropertyDevices` — fires when any audio device is added or removed
 - **iOS:** `AVAudioSession.routeChangeNotification` with reason `oldDeviceUnavailable`
 
@@ -339,29 +374,9 @@ On receipt, check whether the active device UID is still present. If not, cancel
 
 ---
 
-### 6. DSP Worker Backpressure
+### DSP
 
-The persistent `DspWorker` Isolate processes one request at a time. If the user triggers a new measurement while the previous FFT is still running, a second message queues silently on the `SendPort`. The UI has no way to know the worker is busy, and no way to cancel an in-flight computation.
-
-**Required additions to `DspWorker`:**
-- Expose a `bool get busy` stream so the UI can disable the Measure button while processing
-- Expose a `cancel()` method that sends a cancellation token to the Isolate; the worker checks the token between pipeline stages and exits early if set
-- The `AudioEngineService` state machine should reject `Armed` transitions while `DspWorker.busy == true`
-
----
-
-### 7. Memory Management for Overlaid Measurements
-
-Each `FrequencyResponse` holding a full 262,144-point complex FFT result consumes ~4 MB. Five overlaid measurements = ~20 MB in memory simultaneously, plus the 144,000-sample capture buffer retained during averaging.
-
-**Mitigations:**
-- Discard the raw capture buffer from `CaptureResult` immediately after the DSP pipeline completes — only the processed `FrequencyResponse` needs to be retained
-- Store only the final 361 log-resampled frequency/magnitude pairs in memory for display (matching the Pickup Wizard's approach); persist the full FFT result to disk and reload on demand if needed for re-analysis
-- Cap the in-memory overlay list at 5 entries; evict oldest when the cap is exceeded
-
----
-
-### 8. FFT Provider Abstraction
+#### FFT Provider Abstraction
 
 `fftea` is a small package with limited maintenance history. If it is abandoned or breaks with a future Dart SDK the entire DSP pipeline is blocked.
 
@@ -379,30 +394,37 @@ class AccelerateFftProvider implements FftProvider { ... } // native, Phase 3+
 
 Benchmark `fftea` against the native Accelerate framework (Apple) early in Phase 1. On Apple Silicon the native path may be 20–50× faster, making it the better default for the macOS Tier 1 target.
 
+#### Mains Frequency Measurement
+
+The spectral hum suppression interpolates across ±10 bins around mains harmonics. Mains frequency drifts, and at higher harmonic numbers even small deviations shift a harmonic outside the ±10-bin window, leaving hum uncancelled.
+
+Add a "Measure mains frequency" step to the onboarding flow and setup screen:
+- Capture 5 seconds of idle input (no sweep playing)
+- FFT the capture and identify the dominant low-frequency peak
+- Store the measured value (e.g. 49.97 Hz) in `DeviceConfig`
+- Use the measured value — not the nominal — for all hum suppression and golden-ratio spacing calculations
+
+Surface this as a one-tap step in setup, similar to the Pickup Wizard's FFT Analyzer tool.
+
+#### Sweep Clipping Check
+
+The level check tool plays a 1 kHz sine tone, but the actual log-sine sweep has a different amplitude profile. The headphone amp may clip at certain frequencies even if the 1 kHz tone passed cleanly.
+
+Before every full measurement run, play a 1-second excerpt of the sweep at maximum amplitude and capture on input channel 1. If any sample exceeds -1 dBFS, surface a `RecoverableError`:
+
+> "Output is clipping — turn the headphone knob down slightly and recalibrate."
+
+This runs automatically as step 0 of the `Armed` state transition (see Measurement Capture above).
+
 ---
 
-### 9. Onboarding and First Launch
+### Data
 
-On first launch no device is selected, no calibration exists, and the headphone knob has never been set. Without a defined first-launch flow the user will reach the Measure screen with nothing configured and produce meaningless or failed measurements.
-
-**Required:** A linear onboarding flow that runs once on first launch and blocks until complete:
-
-```
-Welcome → Hardware Checklist → Device Selection → Level Check → Chain Calibration → First Measurement
-```
-
-Additionally:
-- Block the Measure screen tab/route if no valid calibration exists
-- Show a persistent banner on the Measure screen if calibration has expired (>30 min), with a one-tap shortcut to re-calibrate
-- Store an `onboardingComplete` flag in `SharedPreferences`; skip onboarding on subsequent launches
-
----
-
-### 10. Atomic File Writes
+#### Atomic File Writes
 
 `DeviceConfig` and calibration data written via `dart:io` `File.writeAsString()` are not atomic — a force-quit mid-write produces corrupt JSON that breaks on next launch.
 
-**Required:** Write all persistent data atomically using a write-then-rename pattern:
+Write all persistent data atomically using a write-then-rename pattern:
 
 ```dart
 Future<void> writeAtomic(File target, String content) async {
@@ -414,11 +436,93 @@ Future<void> writeAtomic(File target, String content) async {
 
 Apply to: `DeviceConfig`, `ChainCalibration`, and all `Measurement` JSON files.
 
+#### `sweepConfig` Comparability Guard
+
+If the user changes sweep parameters between sessions (e.g. extends duration from 3s to 5s), stored measurements made with different configs are not directly comparable. When overlaying measurements in the History/Results screen, compare `sweepConfig` of the incoming measurement against those already displayed. If configs differ, warn:
+
+> "This measurement used different sweep settings and may not be directly comparable."
+
+Allow the user to proceed with explicit acknowledgement.
+
 ---
 
-### 11. CI/CD Pipeline
+### UX
 
-No automated build or test pipeline is defined. Without CI the test suite written in Phase 0 will drift and break silently.
+#### Onboarding and First Launch
+
+On first launch no device is selected, no calibration exists, and the headphone knob has never been set. A linear onboarding flow must run once and block until complete:
+
+```
+Welcome → Hardware Checklist → Device Selection → Mains Frequency → Level Check → Chain Calibration → First Measurement
+```
+
+Additionally:
+- Block the Measure screen tab/route if no valid calibration exists
+- Show a persistent banner on the Measure screen if calibration has expired (>30 min), with a one-tap shortcut to re-calibrate
+- Store an `onboardingComplete` flag in `SharedPreferences`; skip onboarding on subsequent launches
+
+#### Dark / Workshop Theme
+
+A white-background chart in a dim studio or workshop causes eye strain and makes coloured curves harder to read.
+
+- Implement both light and dark themes in `app_theme.dart`
+- Default to `ThemeMode.system` (respects OS setting)
+- Design `FrequencyResponseChart` primarily for dark background — coloured curves on dark grey are significantly more readable in low-light environments
+- Chart background colour must be part of `AppTheme` (not hardcoded) so it responds to theme changes
+
+#### Localization from Day One
+
+Retrofitting `AppLocalizations` after the UI is built requires touching every widget that displays text — a significant and error-prone refactor.
+
+From Phase 0 scaffold:
+- Add `flutter_localizations` and `intl` to `pubspec.yaml`
+- Wire `localizationsDelegates` and `supportedLocales` in `MaterialApp`
+- Extract all user-facing strings to `lib/l10n/app_en.arb` from the start
+
+Only `en` locale needs to ship initially. Adding further locales later becomes a translation task with no code changes required.
+
+#### Accessibility
+
+The frequency response chart is entirely visual with no accessible description for VoiceOver / TalkBack users. Wrap the chart widget in a `Semantics` widget:
+
+```dart
+Semantics(
+  label: 'Frequency response chart. '
+         'Resonance frequency: ${result.resonanceHz.toStringAsFixed(0)} Hz. '
+         'Q-factor: ${result.qFactor.toStringAsFixed(1)}.',
+  child: FrequencyResponseChart(data: result),
+)
+```
+
+The `ResonanceSummaryCard` below the chart already displays this information as readable text — the Semantics label ensures screen readers reach it even if the card is scrolled off screen.
+
+---
+
+### Operations
+
+#### DSP Worker Backpressure
+
+The persistent `DspWorker` Isolate processes one request at a time. If the user triggers a new measurement while the previous FFT is still running, a second message queues silently on the `SendPort` with no way to cancel it.
+
+- Expose a `bool get busy` stream so the UI can disable the Measure button while processing
+- Expose a `cancel()` method that sends a cancellation token to the Isolate; the worker checks the token between pipeline stages and exits early if set
+- The `AudioEngineService` state machine should reject `Armed` transitions while `DspWorker.busy == true`
+
+#### Memory Management for Overlaid Measurements
+
+Each `FrequencyResponse` holding a full 262,144-point complex FFT result consumes ~4 MB. Five overlaid measurements = ~20 MB simultaneously, plus the 144,000-sample capture buffer retained during averaging.
+
+- Discard the raw capture buffer from `CaptureResult` immediately after the DSP pipeline completes
+- Store only the final 361 log-resampled frequency/magnitude pairs in memory for display; persist the full FFT result to disk and reload on demand if needed for re-analysis
+- Cap the in-memory overlay list at 5 entries; evict oldest when exceeded
+
+#### Error Logging and Crash Reporting — DISABLED
+
+> **Status: Disabled.** Crash reporting and remote telemetry are intentionally excluded from this project. No Sentry, Firebase Crashlytics, or equivalent integration will be added.
+
+`FatalError` transitions write a structured log entry to a local rotating file only (`logs/app.log`, max 3 × 1 MB). On `FatalError`, the app displays a "Copy diagnostic log" button that copies the log to the clipboard for manual sharing. No data leaves the device automatically.
+
+#### CI/CD Pipeline
 
 **Minimum viable CI (GitHub Actions):**
 
@@ -439,22 +543,33 @@ The hardware integration test (Phase 3) cannot run in CI — document it as a ma
 
 ---
 
-### 12. Accessibility
+### Testing
 
-The frequency response chart is entirely visual with no accessible description for VoiceOver / TalkBack users. This blocks App Store compliance in some regions.
+#### Widget Tests
 
-**Minimum requirement:** Wrap the chart widget in a `Semantics` widget that describes the key result in plain text:
+The test structure covers unit tests for DSP, data, and audio services but no widget tests for UI screens. Add to test structure:
 
-```dart
-Semantics(
-  label: 'Frequency response chart. '
-         'Resonance frequency: ${result.resonanceHz.toStringAsFixed(0)} Hz. '
-         'Q-factor: ${result.qFactor.toStringAsFixed(1)}.',
-  child: FrequencyResponseChart(data: result),
-)
+```
+test/ui/
+  onboarding_screen_test.dart           # Completion unlocks Measure screen
+  measure_screen_test.dart              # Blocked state; calibration expiry banner tap
+  frequency_response_chart_test.dart    # Cursor inverse transform; Semantics label content
+  history_screen_test.dart              # Overlay rendering; sweepConfig mismatch warning
 ```
 
-The `ResonanceSummaryCard` below the chart already displays this information as readable text — the Semantics label ensures screen readers reach it even if the card is scrolled off screen.
+#### Flutter and Dart SDK Version Pinning
+
+Without explicit SDK constraints, `flutter pub get` on a different machine may resolve to an older SDK that doesn't support Dart records syntax (used in `DspWorker` message passing) or other APIs in the plan.
+
+Set in `pubspec.yaml` from Phase 0:
+
+```yaml
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+  flutter: '>=3.19.0'
+```
+
+Pin to the minimum version that supports all language features and packages used. Update intentionally rather than allowing drift.
 
 ---
 
@@ -475,9 +590,13 @@ The `ResonanceSummaryCard` below the chart already displays this information as 
 | No platform channel test coverage | Mock platform implementation from Phase 0; hardware integration test in Phase 2 |
 | Measurement JSON schema evolution | `schemaVersion` field + `MeasurementMigrator` from day one |
 | Log-axis cursor returning transformed coordinates | Inverse log transform in `fl_chart` touch callback |
-| EMI / mains hum | Golden-ratio sweep spacing for averaging; optional spectral hum suppression |
+| EMI / mains hum | Golden-ratio sweep spacing; optional spectral hum suppression using measured (not nominal) mains frequency |
 | iOS USB class 2 reliability | iOS demoted to Tier 2; gated on macOS validation |
 | Round-trip latency (phase) | Does not affect resonance peak location — acceptable for Tier 1. Phase 4+: cross-correlate reference click to measure and compensate |
+| App backgrounded or interrupted mid-sweep | `willResignActiveNotification` + interruption notification → `RecoverableError` |
+| Sweep output clipping | Step 0 of `Armed` state: 1s clipping check before every full sweep |
+| Measurement traceability | `hardware` block in `Measurement` JSON; `calibrationId` UUID links each result to its calibration |
+| `fftea` package abandonment | `FftProvider` abstraction; `AccelerateFftProvider` swap-in requires no changes outside `fft_provider.dart` |
 
 ---
 
@@ -490,17 +609,17 @@ lib/
     audio_engine_platform_interface.dart
     audio_engine_method_channel.dart
     models/
-      device_config.dart                  # Includes headphone cal state + ResonanceSearchBand
+      device_config.dart                  # Device UID, sample rate, headphone cal state, measured mains Hz, ResonanceSearchBand
       sweep_config.dart
       capture_result.dart
   calibration/
     calibration_service.dart              # Chain calibration: H_chain measurement + storage
     models/
-      chain_calibration.dart              # H_chain(f) + timestamp + invalidation rules
+      chain_calibration.dart              # H_chain(f) + timestamp + calibrationId + invalidation rules
   dsp/
     log_sine_sweep.dart                   # Sweep + inverse filter generation
     dsp_pipeline_service.dart             # Deconvolution, FFT, chain correction, peak detection
-    dsp_worker.dart                       # Persistent Isolate with SendPort message loop + cancel token
+    dsp_worker.dart                       # Persistent Isolate with SendPort message loop + cancel token + busy state
     fft_provider.dart                     # FftProvider abstraction (fftea default; Accelerate swap-in)
     models/
       frequency_response.dart             # 361 log-resampled pairs + all peaks + primary resonance + Q
@@ -509,11 +628,11 @@ lib/
     measurement_repository.dart           # Atomic writes via write-then-rename
     measurement_migrator.dart             # Schema version migration
     models/
-      measurement.dart                    # Includes schemaVersion field
+      measurement.dart                    # schemaVersion + hardware metadata + all result fields
   ui/
     screens/
       onboarding_screen.dart              # Linear first-launch flow; blocks until calibration complete
-      setup_screen.dart                   # Device picker + hardware checklist + level check
+      setup_screen.dart                   # Device picker + hardware checklist + level check + mains frequency tool
       calibration_screen.dart             # Chain calibration flow
       measure_screen.dart                 # Blocked + banner if calibration expired
       results_screen.dart
@@ -526,7 +645,9 @@ lib/
       search_band_overlay.dart            # Shaded ResonanceSearchBand region on chart
       calibration_expiry_banner.dart      # Persistent warning + one-tap re-calibrate shortcut
     theme/
-      app_theme.dart
+      app_theme.dart                      # Light + dark themes; dark default for workshop use
+  l10n/
+    app_en.arb                            # All user-facing strings; add locales here without code changes
   providers/
     audio_engine_provider.dart
     calibration_provider.dart
@@ -546,10 +667,10 @@ ios/
     AudioEnginePlugin.swift               # Shared implementation with macOS (Tier 2)
 
 windows/
-  audio_engine_plugin.cpp                 # WASAPI backend (Phase 4)
+  audio_engine_plugin.cpp                 # WASAPI backend (Phase 5)
 
 android/
-  AudioEnginePlugin.kt                    # Oboe backend (Phase 5 / stretch)
+  AudioEnginePlugin.kt                    # Oboe backend (Phase 6 / stretch)
 
 test/
   dsp/
@@ -563,7 +684,12 @@ test/
     measurement_repository_test.dart      # Atomic write + corrupt file recovery
     measurement_migrator_test.dart        # Schema v0 → v1 migration
   audio/
-    audio_engine_service_test.dart        # State machine: all transitions, interruption, hot-plug, sample rate mismatch
+    audio_engine_service_test.dart        # State machine: all transitions, interruption, hot-plug, sample rate mismatch, AppBackgrounded
+  ui/
+    onboarding_screen_test.dart           # Completion unlocks Measure screen
+    measure_screen_test.dart              # Blocked state; calibration expiry banner tap
+    frequency_response_chart_test.dart    # Cursor inverse transform; Semantics label content
+    history_screen_test.dart              # Overlay rendering; sweepConfig mismatch warning
 ```
 
 ---
@@ -572,13 +698,13 @@ test/
 
 | Phase | Work | Duration |
 |---|---|---|
-| **0 — Scaffold** | Project structure; mock platform plugin (synthetic 4 kHz resonance); all screens wired to mock data; `MeasurementMigrator` with `schemaVersion`; persistent `DspWorker` stub with busy/cancel; `FftProvider` abstraction; atomic file write helper; CI pipeline (GitHub Actions: test + analyze + build macOS) | 1 week |
+| **0 — Scaffold** | Project structure; mock platform plugin (synthetic 4 kHz resonance); all screens wired to mock data; `MeasurementMigrator` with `schemaVersion` + hardware metadata fields; persistent `DspWorker` stub with busy/cancel; `FftProvider` abstraction; atomic file write helper; `AppLocalizations` wired with `app_en.arb`; `app_theme.dart` with light + dark themes; SDK version constraints in `pubspec.yaml`; CI pipeline (GitHub Actions: test + analyze + build macOS) | 1 week |
 | **1 — DSP Engine** | `LogSineSweep` + inverse filter; `DspPipelineService` (deconvolution, chain correction, Tikhonov regularization, configurable search band, all-peaks detection); `FftProvider` benchmark (fftea vs Accelerate); unit tests against synthetic 4 kHz Q=3 pickup model | 1–2 weeks |
-| **2 — Calibration** | `CalibrationService` (chain calibration flow, `H_chain` storage, atomic writes, invalidation rules); level check tool; onboarding flow; `CalibrationExpiryBanner`; Measure screen blocked state | 1 week |
-| **3 — Audio Plugin** | macOS entitlements; Swift `AVAudioEngine` plugin (native buffer capture, single `MethodChannel` transfer); `AVAudioTime` co-start; sample rate negotiation; USB hot-plug detection; audio session interruption handling; cross-correlation alignment check; dropout detection; golden-ratio sweep spacing; end-to-end validation against known pickup (manual gate: ±50 Hz of REW reference) | 2–3 weeks |
-| **4 — UI & Persistence** | History screen; CSV export; `ResonanceSearchBand` UI; all-peaks chart annotation; cursor inverse transform; `Semantics` accessibility wrappers; spectral hum suppression toggle; memory management (discard raw buffers post-pipeline); app polish | 1–2 weeks |
-| **5 — Windows** | WASAPI backend; Windows USB device change notification for hot-plug; sample rate negotiation | 1–2 weeks |
-| **6 — iOS** | AVAudioEngine iOS backend; `NSMicrophoneUsageDescription`; Camera Connection Kit USB class 2 compatibility matrix testing | 1–2 weeks |
+| **2 — Calibration** | `CalibrationService` (chain calibration flow, `H_chain` storage, atomic writes, invalidation rules, `calibrationId` UUID); level check tool; sweep clipping check; mains frequency measurement tool; onboarding flow; `CalibrationExpiryBanner`; Measure screen blocked state; iCloud backup exclusion for measurement storage | 1–2 weeks |
+| **3 — Audio Plugin** | macOS entitlements (`audio-input` + `usb`); Swift `AVAudioEngine` plugin (native buffer capture, single `MethodChannel` transfer); `AVAudioTime` co-start; sample rate negotiation; USB hot-plug detection; audio session interruption + `AppBackgrounded` handling; app lifecycle notifications; cross-correlation alignment check; dropout detection; golden-ratio sweep spacing; local rotating log file for `FatalError`; end-to-end validation against known pickup (manual gate: ±50 Hz of REW reference) | 2–3 weeks |
+| **4 — UI & Persistence** | History screen; CSV export; `ResonanceSearchBand` UI; all-peaks chart annotation; cursor inverse transform; `sweepConfig` comparability guard; `Semantics` accessibility wrappers; spectral hum suppression toggle; memory management (discard raw buffers post-pipeline); widget tests; app polish | 1–2 weeks |
+| **5 — Windows** | WASAPI backend; Windows USB device change notification for hot-plug; sample rate negotiation; minimum Windows 10 build 19041 target | 1–2 weeks |
+| **6 — iOS** | AVAudioEngine iOS backend; `NSMicrophoneUsageDescription`; app lifecycle background handling; minimum iOS 16.0 target; Camera Connection Kit USB class 2 compatibility matrix testing | 1–2 weeks |
 | **7 — Distribution** | macOS .dmg (direct); iOS TestFlight → App Store | — |
 
 > **Note on Mac App Store:** Sandboxing may complicate USB audio device access. Direct distribution via .dmg is recommended for initial release.
