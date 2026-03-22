@@ -73,6 +73,9 @@ The Scarlett 2i2 headphone output is used as the exciter coil driver. It is suit
 
 > **iOS note:** Demoted from Tier 1. USB audio class 2 (required by the Scarlett 2i2) on iOS via Camera Connection Kit has historically been unreliable. iOS development is gated on the macOS audio plugin being fully validated against reference hardware first.
 
+**Bundle identifier:** `com.whatsthefrequency.app`
+Set this in Xcode (macOS and iOS targets) and in `pubspec.yaml` from Phase 0. All entitlements, notarization certificates, and App Store provisioning profiles are tied to this ID — changing it later requires re-signing and re-provisioning every target.
+
 ---
 
 ## Key Packages
@@ -85,8 +88,135 @@ The Scarlett 2i2 headphone output is used as the exciter coil driver. It is suit
 | State management | `flutter_riverpod` | Scoped providers per screen |
 | Persistence | `path_provider` + `dart:io` | JSON per measurement |
 | Export | `csv` | CSV compatible with REW / MATLAB / Excel |
+| App version | `package_info_plus` | Reads `appVersion` from `pubspec.yaml` at runtime for `Measurement` JSON |
+| File write mutex | `synchronized` | Per-repository `Lock` prevents concurrent write races in `MeasurementRepository` and `PickupRepository` |
 
 > **Critical decision:** Do not combine `flutter_pcm_sound` + `flutter_audio_capture`. They use separate audio sessions and will drift relative to each other, corrupting the transfer function. A single `AVAudioEngine` session managing both play and record nodes is required.
+
+---
+
+## Platform Channel API
+
+The Dart facade (`AudioEngineMethodChannel`) and the native implementations (Swift / WASAPI) communicate over two named channels. Both sides must agree on these names and signatures exactly.
+
+### MethodChannel — `com.whatsthefrequency.app/audio_engine`
+
+| Method | Dart args | Returns | Throws |
+|---|---|---|---|
+| `getAvailableDevices` | — | `List<Map>` — each map: `{'uid': String, 'name': String, 'nativeSampleRate': double}` | — |
+| `setDevice` | `{'uid': String}` | `void` | `DEVICE_NOT_FOUND` |
+| `getActiveSampleRate` | — | `double` (Hz) | `NO_DEVICE_SELECTED` |
+| `runCapture` | `{'sweepSamples': Float32List, 'sampleRate': int, 'postRollMs': int}` | `Uint8List` (Float32LE mono PCM, input channel 1) | `DROPOUT_DETECTED`, `DEVICE_DISCONNECTED`, `SAMPLE_RATE_MISMATCH`, `OUTPUT_CLIPPING` |
+| `cancelCapture` | — | `void` | — |
+| `startLevelMeter` | — | `void` | — |
+| `stopLevelMeter` | — | `void` | — |
+
+> `runCapture` is a synchronous-style call that blocks until capture is complete (sweep duration + post-roll). The native side manages the full play+record lifecycle. Dart awaits the `Future` — no polling required.
+
+### EventChannel — `com.whatsthefrequency.app/level_meter`
+
+Streams `double` values (dBFS, input channel 1 peak) at ~10 Hz while the level meter is active. Active between `startLevelMeter` and `stopLevelMeter` calls only.
+
+### EventChannel — `com.whatsthefrequency.app/device_events`
+
+Streams device change notifications as `Map<String, dynamic>`:
+
+```dart
+{'event': 'deviceAdded' | 'deviceRemoved', 'uid': String, 'name': String}
+```
+
+`AudioEngineService` subscribes to this stream at startup and transitions to `DeviceError` if the active device UID appears in a `deviceRemoved` event.
+
+---
+
+## Core Models
+
+These types form the data contracts between layers. Define them fully in Phase 0 even when values are mocked.
+
+### `SweepConfig`
+
+```dart
+class SweepConfig {
+  final double f1Hz;            // default: 20.0
+  final double f2Hz;            // default: 20000.0
+  final double durationSeconds; // default: 3.0
+  final int sampleRate;         // default: 48000
+  final int sweepCount;         // N sweeps to average; default: 4 (minimum for hum cancellation)
+  final int preRollMs;          // default: 512
+  final int postRollMs;         // default: 500
+}
+```
+
+Two `SweepConfig` instances are considered comparable if all fields match. The `sweepConfig` comparability guard compares these field-by-field on overlay.
+
+### `CaptureResult`
+
+```dart
+class CaptureResult {
+  final Float32List samples;    // mono Float32 PCM, input channel 1
+  final int sampleRate;         // Hz — must equal SweepConfig.sampleRate; verify before processing
+  final int sweepIndex;         // 0-based index within the N-sweep average
+  final DateTime capturedAt;
+}
+```
+
+The native layer returns raw `Uint8List` (Float32LE). `AudioEngineMethodChannel` reinterprets it as `Float32List` and wraps it in `CaptureResult` before passing to `AudioEngineService`.
+
+### `FrequencyResponse`
+
+```dart
+class FrequencyResponse {
+  final List<double> frequencyHz;    // 361 log-spaced bins, 20–20000 Hz
+  final List<double> magnitudeDb;    // magnitude at each bin in dB
+  final List<ResonancePeak> peaks;   // all peaks detected above -20 dB relative threshold
+  final ResonancePeak primaryPeak;   // highest peak within ResonanceSearchBand
+  final SweepConfig sweepConfig;     // config used — stored with result for comparability guard
+  final DateTime analyzedAt;
+}
+
+class ResonancePeak {
+  final double frequencyHz;
+  final double magnitudeDb;
+  final double qFactor;
+  final double fLowHz;               // lower -3 dB point
+  final double fHighHz;              // upper -3 dB point
+}
+```
+
+### `DeviceConfig`
+
+```dart
+class DeviceConfig {
+  final String deviceUid;
+  final String deviceName;
+  final int sampleRate;                         // Hz
+  final double measuredMainsHz;                 // from idle capture; default 50.0 until measured
+  final ResonanceSearchBand resonanceSearchBand; // default: 1000–15000 Hz
+  final bool onboardingComplete;
+  final String? activeCalibrationId;            // UUID of current ChainCalibration, null if none
+}
+```
+
+### `ResonanceSearchBand`
+
+```dart
+class ResonanceSearchBand {
+  final double lowHz;   // default: 1000.0
+  final double highHz;  // default: 15000.0
+}
+```
+
+### `Pickup`
+
+```dart
+class Pickup {
+  final String id;               // UUID
+  final String name;             // user-assigned, e.g. "PAF neck"
+  final String? notes;
+  final DateTime createdAt;
+  final List<String> measurementIds; // ordered by date ascending
+}
+```
 
 ---
 
@@ -253,7 +383,7 @@ double chartXToFrequency(double chartX, double chartWidth) {
 - CSV export: `(frequency_hz, magnitude_db)` per measurement — compatible with REW, MATLAB, Excel
 
 **Measurement JSON fields:**
-`schemaVersion`, `id`, `timestamp`, `pickupLabel`, `sweepConfig`, `resonanceSearchBand`, `frequencyBins[]`, `magnitudeDB[]`, `resonanceFrequencyHz`, `qFactor`, `hardware` (interface device name, interface UID, calibration ID, calibration timestamp)
+`schemaVersion`, `id`, `timestamp`, `pickupLabel`, `pickupId`, `sweepConfig`, `resonanceSearchBand`, `frequencyBins[]`, `magnitudeDB[]`, `resonanceFrequencyHz`, `qFactor`, `hardware` (interface device name, interface UID, calibration ID, calibration timestamp, app version)
 
 **Hardware metadata block:**
 ```json
@@ -262,10 +392,13 @@ double chartXToFrequency(double chartX, double chartWidth) {
     "interfaceDeviceName": "Scarlett 2i2 USB",
     "interfaceUID": "AppleUSBAudioEngine:...",
     "calibrationId": "<uuid>",
-    "calibrationTimestamp": "2026-03-21T10:32:00Z"
+    "calibrationTimestamp": "2026-03-21T10:32:00Z",
+    "appVersion": "1.0.0"
   }
 }
 ```
+
+`appVersion` is read from `pubspec.yaml` at runtime via `package_info_plus`. If a DSP algorithm change shifts resonance values in a future release, stored measurements can be attributed to a specific build without re-analysing every file.
 
 **Schema migration:**
 
@@ -279,6 +412,23 @@ class MeasurementMigrator {
   }
 }
 ```
+
+### 7. Results Screen
+
+The results screen is shown immediately after a successful measurement completes (`Analyzing → Complete` transition). It is the primary output surface of the app.
+
+**Content:**
+- `FrequencyResponseChart` — full-width, log-axis, all detected peaks annotated, primary resonance highlighted
+- `ResonanceSummaryCard` — resonance frequency in Hz (large), Q-factor, measurement timestamp, pickup label
+- `ResonanceSearchBand` shaded region on chart
+
+**Actions:**
+- **Save** — prompts for pickup name (pre-filled if a `Pickup` entity was selected before measuring); writes `Measurement` JSON atomically; associates with `Pickup` via `pickupId`; navigates to History screen on confirmation
+- **Discard** — returns to Measure screen without saving; requires confirmation if a valid result was produced
+- **Overlay** — opens a `Pickup` or date picker to select a previously saved measurement; overlays it on the chart with a distinct colour; up to 5 overlaid measurements; applies `sweepConfig` comparability check before rendering
+- **Export** — writes CSV via `CsvExporter`; opens system share sheet
+
+**Navigation:** Reached only from the `Complete` state of `AudioEngineService`. Not reachable from the tab bar directly — use History screen to revisit saved results. Back navigation from Results discards the unsaved result (with confirmation).
 
 ---
 
@@ -360,6 +510,25 @@ func captureComplete(_ samples: [Float]) -> FlutterStandardTypedData {
 }
 ```
 
+#### Level Meter EventChannel Rate Limiting
+
+The level meter EventChannel is specified as ~10 Hz. Without explicit throttling, the native audio buffer callback (firing at ~100 Hz at 512 samples/48 kHz) will forward every buffer peak to the Flutter UI thread at the full buffer rate. At 100 Hz, the UI thread is saturated rebuilding the level meter widget during the level check phase, causing jank in the surrounding setup flow.
+
+The native side must debounce to a fixed 100 ms timer before emitting — computing the peak dBFS across all buffers received within the window and emitting a single value:
+
+```swift
+// Swift — emit at fixed interval, not on every buffer
+var levelTimer: Timer?
+var peakDbfs: Float = -96.0
+
+func startLevelTimer() {
+    levelTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+        self.eventSink?(self.peakDbfs)
+        self.peakDbfs = -96.0 // reset after each emit
+    }
+}
+```
+
 #### Audio Session Interruptions
 
 Other apps can take audio focus mid-measurement (phone calls, notifications, Spotlight). Without interruption handling, a mid-sweep interruption produces a corrupt capture that may pass dropout detection.
@@ -389,8 +558,37 @@ In WASAPI shared mode, the Windows Audio Session API routes audio through the OS
 
 The Windows plugin must request WASAPI exclusive mode at 48 kHz / 24-bit:
 - In exclusive mode, the app owns the device directly and the OS does not resample
-- If the device is already held in exclusive mode by another app, `AUDCLNT_E_DEVICE_IN_USE` is returned — surface this as a `DeviceError` with instructions to close the conflicting app
+- If the device is already held in exclusive mode by another app, `AUDCLNT_E_DEVICE_IN_USE` is returned — surface this as a `DeviceError` with the message: *"Close Focusrite Control (or any other app using the Scarlett 2i2) and try again."* Focusrite Control is the most likely culprit and should be named explicitly.
 - Shared mode is not acceptable for this application and must not be used as a fallback
+
+#### Audio I/O Buffer Size
+
+Neither the macOS nor Windows plugin specifies the hardware I/O buffer size. The macOS default is ~512 samples (~10.7 ms at 48 kHz), but Focusrite Control can override it to values as large as 4,096 samples (~85 ms). An unexpectedly large buffer increases the effective pre-roll required to flush the interface and changes dropout detection thresholds — but using a hardcoded pre-roll tuned for 512-sample buffers will produce silent failures on other configurations.
+
+**Required:** After the engine starts, read the active hardware buffer size from the device and compute pre-roll dynamically:
+
+```swift
+let bufferDuration = AVAudioSession.sharedInstance().ioBufferDuration // iOS
+// macOS: query kAudioDevicePropertyBufferFrameSize via CoreAudio HAL
+let preRollSamples = bufferSize * 4  // flush at least 4 buffer cycles
+```
+
+Use the measured buffer size for pre-roll, dropout detection window, and co-start scheduling headroom.
+
+#### AVAudioEngine Reconnection After Hot-Plug
+
+`AVAudioEngine` cannot be reconfigured while running. After a `deviceRemoved` event, the engine is in an inconsistent state. The reconnection sequence must follow this exact order or the engine produces silence or errors with no clear cause:
+
+1. Stop the engine: `engine.stop()`
+2. Detach all nodes: `engine.detach(playerNode)`, `engine.detach(inputNode)` (input node detach is implicit on reset)
+3. Reset the engine: `engine.reset()`
+4. Wait ~150 ms for Core Audio to settle after the device change notification
+5. Re-attach nodes and reconnect the audio graph
+6. Set the new device UID via Core Audio HAL property
+7. Restart: `try engine.start()`
+8. Verify sample rate before allowing `Armed` transition
+
+Skipping step 4 (the settle delay) causes `engine.start()` to succeed but the device to produce no output — a silent failure that is difficult to diagnose.
 
 ---
 
@@ -436,9 +634,66 @@ Before every full measurement run, play a 1-second excerpt of the sweep at maxim
 
 This runs automatically as step 0 of the `Armed` state transition (see Measurement Capture above).
 
+#### DSP Tuning Parameters
+
+Three values are named in the pipeline but never given defaults. All three require empirical tuning against real pickup measurements — but a starting baseline must be documented so all contributors begin from the same point and deviations are intentional.
+
+| Parameter | Role | Starting value | Risk if wrong |
+|---|---|---|---|
+| Tikhonov ε | Regularization at low-energy bins during chain division | `1e-3` (relative to max `\|X\|`) | Too small → division instability at band edges; too large → real signal suppressed |
+| Savitzky-Golay window | Smoothing in log-frequency space | 11 bins (≈ 1/3 octave at mid-frequencies) | Too wide → peak shift and Q underestimate; too narrow → noise not removed |
+| Peak detection threshold | Minimum peak height relative to max | -20 dB | Too tight → misses secondary resonances; too loose → noise peaks reported as resonances |
+
+Validate each against the synthetic 4 kHz Q=3 pickup model in Phase 1 unit tests before using real hardware.
+
+#### `TransferableTypedData` for Isolate PCM Transfer
+
+Sending a 144,000-sample `Float32List` (576 KB) through `SendPort` copies the entire buffer on each sweep. At N=4 sweeps that is 2.3 MB of copies per measurement, plus the GC pressure from the discarded originals.
+
+`TransferableTypedData` transfers ownership without copying:
+
+```dart
+// Sending side
+final transferable = TransferableTypedData.fromList([samples]);
+sendPort.send(transferable);
+// samples is now invalid — do not read after this line
+
+// Receiving side (in Isolate)
+final samples = message.materialize().asFloat32List();
+```
+
+Use `TransferableTypedData` for all PCM buffer transfers from `AudioEngineMethodChannel` to `DspWorker`. The buffer is discarded after transfer anyway, so the ownership semantics are a natural fit.
+
+#### SweepConfig Mutation During Measurement
+
+If the user changes sweep parameters from the Settings screen while a measurement is in progress, the pre-computed `Float64List` sweep and its inverse filter become inconsistent with the in-flight `CaptureResult`. The DSP pipeline will produce a corrupted result with no obvious error.
+
+**Required:** `SweepConfig` must be treated as immutable for the duration of a measurement session:
+- The Settings screen must disable sweep parameter controls when `AudioEngineService` state is not `Idle`
+- `LogSineSweep` regenerates its buffers only when called from `Idle` state
+- `DspWorker` retains the `SweepConfig` used to generate the inverse filter and validates it matches the `CaptureResult.sweepConfig` before processing
+
 ---
 
 ### Data
+
+#### Repository Write Concurrency
+
+Both `MeasurementRepository` and `PickupRepository` use atomic write-then-rename, but if two writes to the same file race concurrently — e.g. a measurement save and a migration pass running simultaneously — the second write wins and the first is silently lost. Dart's `dart:io` provides no file-level locking.
+
+Wrap each repository's write path in a per-file mutex using `package:synchronized`:
+
+```dart
+final _lock = Lock();
+
+Future<void> save(Measurement m) async {
+  await _lock.synchronized(() async {
+    await writeAtomic(_fileFor(m.id), jsonEncode(m.toJson()));
+  });
+}
+```
+
+A single `Lock` per repository is sufficient — writes to different measurement files can still race, but writes to the same file are serialised.
 
 #### Atomic File Writes
 
@@ -455,6 +710,46 @@ Future<void> writeAtomic(File target, String content) async {
 ```
 
 Apply to: `DeviceConfig`, `ChainCalibration`, and all `Measurement` JSON files.
+
+#### H_chain Storage Resolution
+
+`H_chain(f)` is complex-valued. At full FFT resolution (262,144 bins) it is ~4 MB of JSON — slow to serialise and large on disk. At 361 log-resampled bins it is fast but requires interpolation back onto the FFT frequency grid during division; for a chain response with a sharp notch (e.g. a coil self-resonance), interpolation may miss it entirely.
+
+**Recommended:** Store `H_chain` at 4,096 uniformly-spaced bins covering 0–24 kHz (~125 KB). This is fine enough to resolve any feature the headphone amp or exciter coil can produce, fast to read/write, and avoids the accuracy loss of heavy log-resampling. During division, linearly interpolate from this grid onto the FFT frequency axis.
+
+Define the storage grid in `chain_calibration.dart` as a constant so it is consistent across write and read paths:
+
+```dart
+const int kHChainBins = 4096;
+const double kHChainMaxHz = 24000.0;
+```
+
+#### Split Storage Orphan Risk
+
+`DeviceConfig` (including `activeCalibrationId`) lives in `SharedPreferences`. Calibration files live on disk. On Windows, clearing app data wipes `SharedPreferences` but leaves calibration files on disk. On reinstall on any platform, `SharedPreferences` is reset but the app support directory is typically retained.
+
+On next launch after such an event: `activeCalibrationId` is null but valid `ChainCalibration` files exist — the app starts uncalibrated with orphaned data it cannot reach through normal UI.
+
+**Required startup reconciliation in `CalibrationService.init()`:**
+1. If `activeCalibrationId` is null, scan the `calibrations/` directory
+2. If exactly one valid (non-expired) calibration file exists, restore it as active
+3. If multiple exist, take the most recent
+4. If none exist, proceed to the uncalibrated state normally
+
+#### CSV Export Format
+
+The CSV export format is underspecified in two ways that will break imports:
+
+**Decimal separator:** On Windows with a European locale, `double.toString()` produces `"4999,8"` not `"4999.8"`. REW and MATLAB both require a period separator. The exporter must use `toStringAsFixed(4)` (not `toString()`) to guarantee locale-independent output.
+
+**Column headers:** REW's text import expects specific headers. Use:
+```
+Freq(Hz),SPL(dB)
+20.0000,−48.2341
+...
+```
+
+Add a `CsvExporter` class in Phase 4 that owns this format, with a unit test asserting the header row and that a known `FrequencyResponse` produces the expected first data line.
 
 #### `sweepConfig` Comparability Guard
 
@@ -547,8 +842,20 @@ The `ResonanceSummaryCard` below the chart already displays this information as 
 The persistent `DspWorker` Isolate processes one request at a time. If the user triggers a new measurement while the previous FFT is still running, a second message queues silently on the `SendPort` with no way to cancel it.
 
 - Expose a `bool get busy` stream so the UI can disable the Measure button while processing
-- Expose a `cancel()` method that sends a cancellation token to the Isolate; the worker checks the token between pipeline stages and exits early if set
 - The `AudioEngineService` state machine should reject `Armed` transitions while `DspWorker.busy == true`
+
+**Cancel token implementation:** Dart isolates share no memory — a `bool` flag is invisible across isolate boundaries. The cancel signal must be a message sent to a dedicated second `ReceivePort` inside the worker, polled non-blocking between each of the 10 pipeline stages:
+
+```dart
+// Inside worker isolate — poll cancel port between stages
+bool _isCancelled(ReceivePort cancelPort) =>
+    cancelPort.iterator.moveNext(); // non-blocking peek
+
+// Sending side
+void cancel() => _cancelSendPort.send(null);
+```
+
+If the cancel signal is sent through the same `SendPort` as work requests, it queues behind pending work and arrives after the pipeline has already completed — too late to interrupt anything.
 
 #### Memory Management for Overlaid Measurements
 
@@ -608,17 +915,118 @@ Without notarization, the `.dmg` distribution is limited to users who know how t
 
 ### Testing
 
-#### Widget Tests
+#### Test Coverage and Assertions
 
-The test structure covers unit tests for DSP, data, and audio services but no widget tests for UI screens. Add to test structure:
+The full test suite is specified in the Directory Structure. Key integrity rules:
 
+- Every test file must document its **pass criteria** as inline comments — a test with no assertion specification is not a test, it is a placeholder.
+- The synthetic **4 kHz Q=3 pickup model** in `dsp_pipeline_service_test.dart` is the primary correctness oracle for the DSP pipeline. Any change to the pipeline must keep this test green.
+- **Tolerance bounds** are fixed: resonance ±10 Hz, Q-factor ±0.5. These are tighter than real-world measurement uncertainty to catch regressions, not to reflect hardware limits.
+- **JSON round-trip tests** (`device_config_test.dart`, `sweep_config_test.dart`, `measurement_migrator_test.dart`) are the guard against silent data loss from field renames or serialisation changes.
+- **Widget tests** (`test/ui/`) cover the four highest-risk user flows: onboarding completion gate, measure screen blocked state, chart cursor transform accuracy, and history overlay limit enforcement.
+- The **manual hardware integration gate** (Phase 3) is not automated: run against a reference pickup, assert reported resonance is within ±50 Hz of a REW or Pickup Wizard ground-truth value. Document the result in the release notes for each build.
+
+#### Estimated Code Coverage by Layer
+
+**Target: 95% Dart, 90% overall (including native)**
+
+| Layer | Files | Baseline | With full suite | What closes the gap |
+|---|---|---|---|---|
+| DSP | `dsp/` | ~75% | ~93% | Edge cases: all-zero input, short input, non-default sweep config |
+| Calibration | `calibration/` | ~75% | ~90% | Concurrent write, I/O failure paths |
+| Data | `data/` | ~85% | ~97% | `csv_exporter_test.dart` covers the only untested file |
+| Audio service (Dart) | `audio_engine_service.dart` | ~80% | ~95% | Already fully specified |
+| Audio channel (Dart) | `audio_engine_method_channel.dart` | ~0% | ~90% | `audio_engine_method_channel_test.dart` (Phase 3) |
+| Providers | `providers/` | ~0% | ~90% | `provider_integration_test.dart` (Phase 4) |
+| UI screens | `ui/screens/` | ~55% | ~95% | `setup_screen`, `calibration_screen`, `results_screen` tests added |
+| UI widgets | `ui/widgets/` | ~20% | ~95% | 5 new widget tests: `LevelMeter`, `DevicePicker`, `SearchBandOverlay`, `CalibrationExpiryBanner`, `ResonanceSummaryCard` |
+| Native Swift (macOS/iOS) | `macos/Classes/`, `ios/Classes/` | 0% | ~85% | XCTest suite (see Native Test Framework below) |
+| Native C++ (Windows) | `windows/` | 0% | ~80% | Google Test suite (see Native Test Framework below) |
+| **Overall Dart** | | **~65%** | **~95%** | |
+| **Overall including native** | | **~50%** | **~90%** | |
+
+The remaining ~5% of Dart code that resists coverage: `main.dart` bootstrap, theme switch animation paths, and `FatalError` display paths that require a plugin crash to trigger — none of these affect measurement correctness.
+
+#### Native Test Framework (XCTest + Google Test)
+
+The Flutter test runner does not execute Swift or C++. Reaching 90% overall coverage requires separate native test suites that run as additional CI jobs.
+
+**macOS / iOS — XCTest**
+
+Add a test target to the Xcode project (`WtFKTests`) covering the three Swift classes most likely to regress:
+
+| Class | Key test cases |
+|---|---|
+| `AudioDeviceEnumerator` | Returns correct device list from mocked Core Audio HAL; active device UID matches after `setDevice`; `deviceRemoved` event fires when active device disappears |
+| `SweepPlayer` | Output buffer contains correct number of samples; playback starts on scheduled `AVAudioTime`; cancels cleanly mid-sweep |
+| `InputCapture` | Captures correct sample count after stop; dropout flag set when buffer underruns; peak dBFS computed correctly for level meter |
+
+Run in CI as a separate job:
+```yaml
+xcode-test:
+  runs-on: macos-latest
+  steps:
+    - uses: actions/checkout@v4
+    - run: xcodebuild test
+             -project macos/Runner.xcodeproj
+             -scheme WtFKTests
+             -destination 'platform=macOS'
 ```
-test/ui/
-  onboarding_screen_test.dart           # Completion unlocks Measure screen
-  measure_screen_test.dart              # Blocked state; calibration expiry banner tap
-  frequency_response_chart_test.dart    # Cursor inverse transform; Semantics label content
-  history_screen_test.dart              # Overlay rendering; sweepConfig mismatch warning
+
+**Windows — Google Test**
+
+Add a `tests/` directory to `windows/` with Google Test covering the WASAPI backend:
+
+| Class | Key test cases |
+|---|---|
+| `AudioEnginePlugin` (WASAPI) | Exclusive mode requested at 48 kHz/24-bit; `AUDCLNT_E_DEVICE_IN_USE` mapped to `DeviceError`; device change notification triggers hot-plug callback |
+
+Run in CI as a separate job:
+```yaml
+windows-test:
+  runs-on: windows-latest
+  steps:
+    - uses: actions/checkout@v4
+    - run: cmake -B build -S windows/tests && cmake --build build
+    - run: build\Debug\WtFKTests.exe
 ```
+
+`AudioEnginePlugin.h` must expose a seam for injecting a mock WASAPI `IMMDeviceEnumerator` — this requires the real implementation to accept the enumerator by dependency injection rather than calling `CoCreateInstance` directly.
+
+#### Updated CI/CD Pipeline
+
+Replace the single CI job with three parallel jobs:
+
+```yaml
+on: [push, pull_request]
+jobs:
+  dart-test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+      - run: flutter test --coverage
+      - run: flutter analyze
+      - run: flutter build macos --release
+
+  xcode-test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: xcodebuild test
+               -project macos/Runner.xcodeproj
+               -scheme WtFKTests
+               -destination 'platform=macOS'
+
+  windows-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -B build -S windows/tests && cmake --build build
+      - run: build\Debug\WtFKTests.exe
+```
+
+All three jobs must pass before a PR can merge.
 
 #### Flutter and Dart SDK Version Pinning
 
@@ -664,6 +1072,23 @@ Pin to the minimum version that supports all language features and packages used
 | Windows OS resampling corrupts frequency accuracy | WASAPI exclusive mode at 48 kHz/24-bit; `AUDCLNT_E_DEVICE_IN_USE` → `DeviceError`; shared mode not permitted |
 | Flat measurement records hide per-pickup history | `Pickup` entity with `measurementIds`; `PickupRepository`; History screen grouped-by-pickup view |
 | Un-notarized `.dmg` blocked by Gatekeeper | Developer ID cert + hardened runtime + `xcrun notarytool` + `xcrun stapler` in CI pipeline |
+| Tikhonov ε, S-G window, peak threshold unspecified | Starting values documented in DSP Tuning Parameters; validated against synthetic 4 kHz Q=3 model in Phase 1 |
+| H_chain JSON is 4 MB at full FFT resolution | Store at 4,096 uniform bins (0–24 kHz); interpolate onto FFT grid during division |
+| Isolate PCM transfer copies 576 KB per sweep | Use `TransferableTypedData` — zero-copy ownership transfer; buffer is discarded after sending anyway |
+| SweepConfig changed mid-measurement | Settings controls disabled outside `Idle`; `DspWorker` validates config matches before processing |
+| AVAudioEngine state undefined after hot-plug | Eight-step reconnection sequence with 150 ms settle delay; documented in Audio Considerations |
+| I/O buffer size assumed 512 samples | Read actual buffer size from hardware after engine start; derive pre-roll and dropout window dynamically |
+| WASAPI exclusive mode denied by Focusrite Control | Error message names Focusrite Control explicitly; shared mode fallback explicitly prohibited |
+| Concurrent repository writes silently lose data | Per-repository `Lock` from `package:synchronized` serialises all writes to the same file |
+| SharedPreferences reset orphans calibration files | Startup reconciliation in `CalibrationService.init()` scans `calibrations/` and restores most-recent valid file |
+| Cancel token sent through work `SendPort` arrives too late | Dedicated cancel `ReceivePort` inside worker; polled non-blocking between each of the 10 pipeline stages |
+| Level meter fires at audio buffer rate (~100 Hz) | Native side debounces to 100 ms timer before emitting on EventChannel |
+| CSV decimal separator locale-dependent | `CsvExporter` uses `toStringAsFixed(4)` with period separator; REW-compatible header row; tested with `csv_exporter_test.dart` |
+| App version absent from Measurement JSON | `appVersion` field in `hardware` block via `package_info_plus`; enables per-build attribution of algorithm changes |
+| Results screen has no specification | Feature 7 added: content, four actions (Save / Discard / Overlay / Export), and navigation contract fully defined |
+| Dart coverage stuck at ~65% | 5 widget tests + DSP edge cases + provider integration test + method channel test → ~95% Dart |
+| Native Swift code has 0% automated coverage | XCTest suite (`WtFKTests`) for `AudioDeviceEnumerator`, `SweepPlayer`, `InputCapture`; runs in CI on `macos-latest` |
+| Native WASAPI code has 0% automated coverage | Google Test suite in `windows/tests/`; `IMMDeviceEnumerator` injected for testability; runs in CI on `windows-latest` |
 
 ---
 
@@ -722,6 +1147,7 @@ lib/
     calibration_provider.dart
     dsp_provider.dart
     measurement_provider.dart
+    pickup_provider.dart
   main.dart
 
 macos/
@@ -747,22 +1173,39 @@ android/
 
 test/
   dsp/
-    log_sine_sweep_test.dart
-    dsp_pipeline_service_test.dart        # Synthetic pickup model: 4 kHz, Q=3
-    dsp_worker_test.dart                  # Busy state, cancel token, backpressure
-    fft_provider_test.dart                # fftea vs known analytic result
+    log_sine_sweep_test.dart              # Instantaneous frequency correct at t=0 and t=T; sample count == durationSeconds × sampleRate; inverse filter is time-reversed with correct amplitude envelope
+    dsp_pipeline_service_test.dart        # Synthetic 4 kHz Q=3 pickup model; pass criteria: resonance within ±10 Hz of 4000, Q within ±0.5 of 3.0; chain division identity (H_chain == H_measured → flat output ±0.1 dB); no NaN/Inf when any H_chain bin is near zero; DSP tuning defaults (ε=1e-3, S-G window=11, threshold=-20 dB) produce correct results; all-zero input produces flat output not NaN; input shorter than FFT window is zero-padded correctly; non-default f1/f2/duration sweep config produces correct instantaneous frequency
+    dsp_worker_test.dart                  # Busy state blocks re-entry; cancel token exits pipeline early; TransferableTypedData round-trip; SweepConfig mismatch between worker and capture result is rejected
+    fft_provider_test.dart                # Pure sine at known frequency produces peak at correct bin (±1 bin); fftea and AccelerateFftProvider produce identical output within floating-point tolerance
   calibration/
-    calibration_service_test.dart         # Mock chain response + correction verification
+    calibration_service_test.dart         # Mock chain response divided out correctly; calibration timestamp expiry detected; calibrationId UUID generated and stored; near-zero H_chain bins do not produce NaN after division
+    chain_calibration_test.dart           # H_chain written at 4096 bins; read-back produces identical values; interpolation onto FFT frequency axis is monotonic and within tolerance of original
   data/
-    measurement_repository_test.dart      # Atomic write + corrupt file recovery
-    measurement_migrator_test.dart        # Schema v0 → v1 migration
+    measurement_repository_test.dart      # Atomic write succeeds; corrupt .tmp file on launch does not crash; measurements load and round-trip through JSON without data loss
+    measurement_migrator_test.dart        # Schema v0 → v1 migration produces all required fields; unknown future version passes through without crash
+    device_config_test.dart               # JSON serialisation round-trip preserves all fields; missing optional fields deserialise to documented defaults; field name changes detected immediately
+    sweep_config_test.dart                # Two configs with identical fields compare equal; any single differing field compares unequal; used by comparability guard
+    pickup_repository_test.dart           # Create/read/update/delete pickup; measurementId association; atomic write; missing file returns empty list not crash
+    csv_exporter_test.dart                # Header row matches REW import format; decimal separator is period regardless of locale; known FrequencyResponse produces expected first data line
   audio/
-    audio_engine_service_test.dart        # State machine: all transitions, interruption, hot-plug, sample rate mismatch, AppBackgrounded
+    audio_engine_service_test.dart        # State machine: all valid transitions; DspWorker.busy blocks Armed transition; SweepConfig mutation rejected outside Idle; interruption → RecoverableError; hot-plug → DeviceError; sample rate mismatch → DeviceError; AppBackgrounded → RecoverableError; pre-roll adjusts for non-default buffer size
+    audio_engine_method_channel_test.dart # Method name strings correct; argument map keys and types match platform channel contract; return type casts succeed; missing plugin produces clear error not silent null
   ui/
-    onboarding_screen_test.dart           # Completion unlocks Measure screen
-    measure_screen_test.dart              # Blocked state; calibration expiry banner tap
-    frequency_response_chart_test.dart    # Cursor inverse transform; Semantics label content
-    history_screen_test.dart              # Overlay rendering; sweepConfig mismatch warning
+    onboarding_screen_test.dart           # Completion unlocks Measure screen; incomplete onboarding blocks navigation
+    setup_screen_test.dart                # Level check meter updates; device picker selection persists; hardware checklist items can be checked and unchecked
+    calibration_screen_test.dart          # Calibration flow completes and stores result; abort returns to setup; expired calibration triggers re-run prompt
+    measure_screen_test.dart              # Blocked state when no calibration; calibration expiry banner tap navigates to calibration screen
+    results_screen_test.dart              # Save flow writes Measurement JSON and navigates to History; Discard requires confirmation; Overlay applies sweepConfig guard; Export produces valid CSV
+    frequency_response_chart_test.dart    # Cursor inverse transform returns correct Hz at chart extremes and midpoint; Semantics label contains resonance Hz and Q-factor
+    history_screen_test.dart              # Overlay renders up to 5 measurements; sweepConfig mismatch warning shown; 6th measurement evicts oldest
+    widgets/
+      level_meter_test.dart               # Renders correct dBFS value; clipping indicator shown above -1 dBFS; animates smoothly between values
+      device_picker_test.dart             # Renders device list from provider; selection callback fires with correct UID; empty list shows "No devices found" placeholder
+      search_band_overlay_test.dart       # Overlay renders at correct fractional chart coordinates for given band; updates position when band changes
+      calibration_expiry_banner_test.dart # Shown when calibration age exceeds threshold; hidden when calibration is valid; tap fires recalibrate callback
+      resonance_summary_card_test.dart    # Resonance Hz formatted as "5.2 kHz" above 1000 Hz and "820 Hz" below; Q-factor and timestamp both displayed
+  providers/
+    provider_integration_test.dart        # Full Riverpod provider graph mounted; CalibrationProvider invalidates when DeviceConfig changes; DspProvider busy state observed by AudioEngineService; MeasurementProvider reflects repository writes; PickupProvider groups measurements by pickupId
 ```
 
 ---
@@ -771,12 +1214,12 @@ test/
 
 | Phase | Work | Duration |
 |---|---|---|
-| **0 — Scaffold** | Project structure; mock platform plugin (synthetic 4 kHz resonance); all screens wired to mock data; `MeasurementMigrator` with `schemaVersion` + hardware metadata fields; `Pickup` entity + `PickupRepository`; persistent `DspWorker` stub with busy/cancel; `FftProvider` abstraction; atomic file write helper; `AppLocalizations` wired with `app_en.arb`; `app_theme.dart` with light + dark themes; SDK version constraints in `pubspec.yaml`; `PrivacyInfo.xcprivacy` stubs in macOS and iOS targets; CI pipeline (GitHub Actions: test + analyze + build macOS) | 1 week |
-| **1 — DSP Engine** | `LogSineSweep` + inverse filter; `DspPipelineService` (deconvolution, chain correction, Tikhonov regularization, configurable search band, all-peaks detection); `FftProvider` benchmark (fftea vs Accelerate); unit tests against synthetic 4 kHz Q=3 pickup model | 1–2 weeks |
-| **2 — Calibration** | `CalibrationService` (chain calibration flow, `H_chain` storage, atomic writes, invalidation rules, `calibrationId` UUID); level check tool; sweep clipping check; mains frequency measurement tool; onboarding flow; `CalibrationExpiryBanner`; Measure screen blocked state; iCloud backup exclusion for measurement storage | 1–2 weeks |
-| **3 — Audio Plugin** | macOS entitlements (`audio-input` + `usb`); Swift `AVAudioEngine` plugin (native buffer capture, single `MethodChannel` transfer); `AVAudioTime` co-start; sample rate negotiation; USB hot-plug detection; audio session interruption + `AppBackgrounded` handling; app lifecycle notifications; cross-correlation alignment check; dropout detection; golden-ratio sweep spacing; local rotating log file for `FatalError`; end-to-end validation against known pickup (manual gate: ±50 Hz of REW reference) | 2–3 weeks |
-| **4 — UI & Persistence** | History screen; CSV export; `ResonanceSearchBand` UI; all-peaks chart annotation; cursor inverse transform; `sweepConfig` comparability guard; `Semantics` accessibility wrappers; spectral hum suppression toggle; memory management (discard raw buffers post-pipeline); widget tests; app polish | 1–2 weeks |
-| **5 — Windows** | WASAPI exclusive mode backend (48 kHz/24-bit; `AUDCLNT_E_DEVICE_IN_USE` → `DeviceError`); Windows USB device change notification for hot-plug; sample rate negotiation; minimum Windows 10 build 19041 target | 1–2 weeks |
+| **0 — Scaffold** | Project structure; mock platform plugin (synthetic 4 kHz resonance); all screens wired to mock data; `MeasurementMigrator` with `schemaVersion` + hardware metadata fields; `Pickup` entity + `PickupRepository`; persistent `DspWorker` stub with busy/cancel; `FftProvider` abstraction; atomic file write helper; `AppLocalizations` wired with `app_en.arb`; `app_theme.dart` with light + dark themes; SDK version constraints in `pubspec.yaml`; `PrivacyInfo.xcprivacy` stubs in macOS and iOS targets; CI pipeline (GitHub Actions: test + analyze + build macOS); `device_config_test.dart`; `sweep_config_test.dart`; `measurement_repository_test.dart`; `measurement_migrator_test.dart`; `pickup_repository_test.dart` | 1 week |
+| **1 — DSP Engine** | `LogSineSweep` + inverse filter; `DspPipelineService` (deconvolution, chain correction, Tikhonov regularization, configurable search band, all-peaks detection); `FftProvider` benchmark (fftea vs Accelerate); `log_sine_sweep_test.dart`; `fft_provider_test.dart`; `dsp_pipeline_service_test.dart` with full pass criteria (resonance ±10 Hz, Q ±0.5, chain identity, no NaN, tuning defaults validated); `dsp_worker_test.dart` | 1–2 weeks |
+| **2 — Calibration** | `CalibrationService` (chain calibration flow, `H_chain` storage at 4,096 bins, atomic writes, invalidation rules, `calibrationId` UUID); level check tool; sweep clipping check; mains frequency measurement tool; onboarding flow; `CalibrationExpiryBanner`; Measure screen blocked state; iCloud backup exclusion; `calibration_service_test.dart`; `chain_calibration_test.dart`; `setup_screen_test.dart`; `calibration_screen_test.dart` | 1–2 weeks |
+| **3 — Audio Plugin** | macOS entitlements (`audio-input` + `usb`); Swift `AVAudioEngine` plugin (native buffer capture, single `MethodChannel` transfer); `AVAudioTime` co-start; sample rate negotiation; USB hot-plug detection; audio session interruption + `AppBackgrounded` handling; app lifecycle notifications; cross-correlation alignment check; dropout detection; golden-ratio sweep spacing; local rotating log file for `FatalError`; `audio_engine_method_channel_test.dart`; XCTest suite (`WtFKTests` target) for `AudioDeviceEnumerator`, `SweepPlayer`, `InputCapture`; XCTest CI job added; end-to-end validation against known pickup (manual gate: ±50 Hz of REW reference) | 2–3 weeks |
+| **4 — UI & Persistence** | History screen; CSV export (`CsvExporter` + `csv_exporter_test.dart`); `ResonanceSearchBand` UI; all-peaks chart annotation; cursor inverse transform; `sweepConfig` comparability guard; `Semantics` accessibility wrappers; spectral hum suppression toggle; memory management (discard raw buffers post-pipeline); `provider_integration_test.dart`; widget tests for all 5 remaining widgets (`LevelMeter`, `DevicePicker`, `SearchBandOverlay`, `CalibrationExpiryBanner`, `ResonanceSummaryCard`); `results_screen_test.dart`; `history_screen_test.dart`; app polish | 1–2 weeks |
+| **5 — Windows** | WASAPI exclusive mode backend (48 kHz/24-bit; `AUDCLNT_E_DEVICE_IN_USE` → `DeviceError`; `IMMDeviceEnumerator` injected for testability); Windows USB device change notification for hot-plug; sample rate negotiation; minimum Windows 10 build 19041 target; Google Test suite (`windows/tests/`); Windows CI job added | 1–2 weeks |
 | **6 — iOS** | AVAudioEngine iOS backend; `NSMicrophoneUsageDescription`; app lifecycle background handling; minimum iOS 16.0 target; Camera Connection Kit USB class 2 compatibility matrix testing | 1–2 weeks |
 | **7 — Distribution** | macOS: Developer ID signing + hardened runtime + notarization (`xcrun notarytool` + `xcrun stapler`) + `.dmg` packaging; iOS: `PrivacyInfo.xcprivacy` final review + TestFlight → App Store | — |
 
