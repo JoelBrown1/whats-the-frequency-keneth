@@ -1,0 +1,202 @@
+{
+  "@@locale": "en",
+  "appTitle": "What's the Frequency, Kenneth",
+  "@appTitle": {
+    "description": "Application title"
+  },
+
+  "onboardingWelcomeTitle": "Welcome",
+  "@onboardingWelcomeTitle": {
+    "description": "Onboarding welcome screen title"
+  },
+
+  "onboardingWelcomeSubtitle": "Measure the resonance frequency of guitar pickups using your audio interface.",
+  "@onboardingWelcomeSubtitle": {
+    "description": "Onboarding welcome screen subtitle"
+  },
+
+  "onboardingHardwareTitle": "Hardware Checklist",
+  "@onboardingHardwareTitle": {
+    "description": "Onboarding hardware checklist step title"
+  },
+
+  "onboardingDeviceTitle": "Select Audio Interface",
+  "@onboardingDeviceTitle": {
+    "description": "Onboarding device selection step title"
+  },
+
+  "onboardingMainsTitle": "Measure Mains Frequency",
+  "@onboardingMainsTitle": {
+    "description": "Onboarding mains frequency step title"
+  },
+
+  "onboardingLevelTitle": "Level Check",
+  "@onboardingLevelTitle": {
+    "description": "Onboarding level check step title"
+  },
+
+  "onboardingCalibrationTitle": "Chain Calibration",
+  "@onboardingCalibrationTitle": {
+    "description": "Onboarding chain calibration step title"
+  },
+
+  "errorDropoutDetected": "Dropout detected — audio interface glitch. Please retry.",
+  "@errorDropoutDetected": {
+    "description": "Error: dropout detected during capture"
+  },
+
+  "errorOutputClipping": "Output is clipping — turn the headphone knob down slightly and recalibrate.",
+  "@errorOutputClipping": {
+    "description": "Error: output clipping detected"
+  },
+
+  "errorDeviceNotFound": "Audio device not found. Please check connections and try again.",
+  "@errorDeviceNotFound": {
+    "description": "Error: device not found"
+  },
+
+  "errorSampleRateMismatch": "Sample rate mismatch — set the Scarlett 2i2 to 48 kHz in Focusrite Control.",
+  "@errorSampleRateMismatch": {
+    "description": "Error: sample rate mismatch"
+  },
+
+  "errorAppBackgrounded": "Measurement interrupted — app moved to background. Please retry.",
+  "@errorAppBackgrounded": {
+    "description": "Error: app backgrounded during capture"
+  },
+
+  "errorInterrupted": "Audio session interrupted. Please retry.",
+  "@errorInterrupted": {
+    "description": "Error: audio session interrupted"
+  },
+
+  "calibrationComplete": "Calibration complete",
+  "@calibrationComplete": {
+    "description": "Calibration completed successfully"
+  },
+
+  "calibrationExpiredWarning": "Calibration has expired. Tap to recalibrate.",
+  "@calibrationExpiredWarning": {
+    "description": "Warning banner when calibration has expired"
+  },
+
+  "calibrationResistorPrompt": "Replace the pickup with a 10 kΩ resistor, then tap Calibrate.",
+  "@calibrationResistorPrompt": {
+    "description": "Prompt to replace pickup with resistor for calibration"
+  },
+
+  "calibrationPickupStillConnected": "A pickup signal is still present — replace the pickup with the 10 kΩ resistor before calibrating.",
+  "@calibrationPickupStillConnected": {
+    "description": "Error: pickup still connected during calibration pre-check"
+  },
+
+  "levelCheckTarget": "Target: −12 dBFS. Mark the headphone knob position once level is correct.",
+  "@levelCheckTarget": {
+    "description": "Level check target instruction"
+  },
+
+  "measureStart": "Start Measurement",
+  "@measureStart": {
+    "description": "Button to start a measurement"
+  },
+
+  "measureRetry": "Retry",
+  "@measureRetry": {
+    "description": "Button to retry a failed measurement"
+  },
+
+  "measureDiscard": "Discard",
+  "@measureDiscard": {
+    "description": "Button to discard the current measurement result"
+  },
+
+  "measureSave": "Save",
+  "@measureSave": {
+    "description": "Button to save the current measurement result"
+  },
+
+  "measureExport": "Export CSV",
+  "@measureExport": {
+    "description": "Button to export the current measurement as CSV"
+  },
+
+  "measureNoCalibration": "No valid calibration. Please calibrate before measuring.",
+  "@measureNoCalibration": {
+    "description": "Message when no valid calibration exists"
+  },
+
+  "historyEmptyState": "No measurements yet. Complete a measurement to see results here.",
+  "@historyEmptyState": {
+    "description": "Empty state message for history screen"
+  },
+
+  "historyGroupByPickup": "Group by pickup",
+  "@historyGroupByPickup": {
+    "description": "Toggle label for history grouping"
+  },
+
+  "settingsTitle": "Settings",
+  "@settingsTitle": {
+    "description": "Settings screen title"
+  },
+
+  "setupTitle": "Setup",
+  "@setupTitle": {
+    "description": "Setup screen title"
+  },
+
+  "calibrationTitle": "Calibration",
+  "@calibrationTitle": {
+    "description": "Calibration screen title"
+  },
+
+  "measureTitle": "Measure",
+  "@measureTitle": {
+    "description": "Measure screen title"
+  },
+
+  "resultsTitle": "Results",
+  "@resultsTitle": {
+    "description": "Results screen title"
+  },
+
+  "noDevicesFound": "No audio devices found",
+  "@noDevicesFound": {
+    "description": "Placeholder when no audio devices are available"
+  },
+
+  "overlayMeasurement": "Overlay",
+  "@overlayMeasurement": {
+    "description": "Button to overlay a previous measurement"
+  },
+
+  "sweepConfigMismatchWarning": "This measurement used different sweep settings and may not be directly comparable.",
+  "@sweepConfigMismatchWarning": {
+    "description": "Warning when overlaying measurements with different sweep configs"
+  },
+
+  "recalibrate": "Recalibrate",
+  "@recalibrate": {
+    "description": "Button to trigger recalibration"
+  },
+
+  "next": "Next",
+  "@next": {
+    "description": "Next button in onboarding flow"
+  },
+
+  "back": "Back",
+  "@back": {
+    "description": "Back button"
+  },
+
+  "confirm": "Confirm",
+  "@confirm": {
+    "description": "Confirm button"
+  },
+
+  "cancel": "Cancel",
+  "@cancel": {
+    "description": "Cancel button"
+  }
+}
