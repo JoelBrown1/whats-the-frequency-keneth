@@ -1,15 +1,13 @@
 // lib/main.dart
-// App entry point. Registers mock platform in debug mode.
-// Routes to onboarding or home based on lastCompletedOnboardingStep.
+// App entry point.
+// Routes: SplashScreen decides onboarding vs home based on DeviceConfig.
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:whats_the_frequency/dsp/models/frequency_response.dart';
 import 'package:whats_the_frequency/l10n/app_localizations.dart';
+import 'package:whats_the_frequency/providers/device_config_provider.dart';
 
-import 'audio/audio_engine_method_channel.dart';
-import 'audio/audio_engine_platform_interface.dart';
-import 'audio/mock_audio_engine_platform.dart';
 import 'ui/screens/calibration_screen.dart';
 import 'ui/screens/history_screen.dart';
 import 'ui/screens/measure_screen.dart';
@@ -19,13 +17,6 @@ import 'ui/screens/setup_screen.dart';
 import 'ui/theme/app_theme.dart';
 
 void main() {
-  // Register mock platform in debug/test mode; real channel in release.
-  if (kDebugMode) {
-    AudioEnginePlatformInterface.instance = MockAudioEnginePlatform();
-  } else {
-    AudioEnginePlatformInterface.instance = AudioEngineMethodChannel();
-  }
-
   runApp(const ProviderScope(child: WtfkApp()));
 }
 
@@ -41,15 +32,51 @@ class WtfkApp extends StatelessWidget {
       themeMode: ThemeMode.dark,
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
-      initialRoute: '/onboarding',
+      home: const SplashScreen(),
       routes: {
         '/onboarding': (_) => const OnboardingScreen(),
         '/home': (_) => const HomeScreen(),
         '/setup': (_) => const SetupScreen(),
         '/calibration': (_) => const CalibrationScreen(),
         '/measure': (_) => const MeasureScreen(),
-        '/results': (_) => const ResultsScreen(),
+        '/results': (ctx) => ResultsScreen(
+              frequencyResponse: ModalRoute.of(ctx)!.settings.arguments
+                  as FrequencyResponse?,
+            ),
         '/history': (_) => const HistoryScreen(),
+      },
+    );
+  }
+}
+
+/// Async splash — reads DeviceConfig then routes to onboarding or home.
+class SplashScreen extends ConsumerWidget {
+  const SplashScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final configAsync = ref.watch(deviceConfigProvider);
+    return configAsync.when(
+      data: (config) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final route =
+              config.onboardingComplete ? '/home' : '/onboarding';
+          Navigator.of(context).pushReplacementNamed(route);
+        });
+        return const Scaffold(
+          body: Center(child: CircularProgressIndicator()),
+        );
+      },
+      loading: () => const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      ),
+      error: (_, __) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          Navigator.of(context).pushReplacementNamed('/onboarding');
+        });
+        return const Scaffold(
+          body: Center(child: CircularProgressIndicator()),
+        );
       },
     );
   }

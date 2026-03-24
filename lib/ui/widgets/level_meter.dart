@@ -12,7 +12,12 @@ class LevelMeter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final semanticsLabel = _isClipping
+        ? 'Level: ${dbfs.toStringAsFixed(1)} dBFS — clipping'
+        : 'Level: ${dbfs.toStringAsFixed(1)} dBFS';
+    return Semantics(
+      label: semanticsLabel,
+      child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
         color: _isClipping ? Colors.red.shade900 : Colors.grey.shade900,
@@ -43,6 +48,6 @@ class LevelMeter extends StatelessWidget {
           ],
         ],
       ),
-    );
+    ));
   }
 }

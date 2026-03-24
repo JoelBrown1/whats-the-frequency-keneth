@@ -1,19 +1,21 @@
 // lib/ui/screens/onboarding_screen.dart
 // Linear first-launch onboarding flow.
-// Steps: Welcome(0), HW Checklist(1), Device Selection(2),
-//        Mains Frequency(3), Level Check(4), Chain Calibration(5).
+// Steps: Welcome, Hardware, Device, Mains, Level, Calibration.
 // Resumes mid-flow using lastCompletedOnboardingStep from DeviceConfig.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-/// Onboarding step indices.
-const int kOnboardingStepWelcome = 0;
-const int kOnboardingStepHardware = 1;
-const int kOnboardingStepDevice = 2;
-const int kOnboardingStepMains = 3;
-const int kOnboardingStepLevel = 4;
-const int kOnboardingStepCalibration = 5;
+import 'package:whats_the_frequency/l10n/l10n.dart';
+import 'package:whats_the_frequency/providers/audio_engine_platform_provider.dart';
+import 'package:whats_the_frequency/providers/available_devices_provider.dart';
+import 'package:whats_the_frequency/providers/calibration_provider.dart';
+import 'package:whats_the_frequency/providers/device_config_provider.dart';
+import 'package:whats_the_frequency/providers/level_meter_provider.dart';
+import 'package:whats_the_frequency/providers/sweep_config_provider.dart';
+import 'package:whats_the_frequency/ui/screens/onboarding_step.dart';
+import 'package:whats_the_frequency/ui/widgets/calibration_flow_widget.dart';
+import 'package:whats_the_frequency/ui/widgets/device_picker.dart';
+import 'package:whats_the_frequency/ui/widgets/level_meter.dart';
 
 class OnboardingScreen extends ConsumerStatefulWidget {
   const OnboardingScreen({super.key});
@@ -23,41 +25,80 @@ class OnboardingScreen extends ConsumerStatefulWidget {
 }
 
 class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
-  int _currentStep = kOnboardingStepWelcome;
+  OnboardingStep _currentStep = OnboardingStep.welcome;
+  bool _levelConfirmed = false;
+  bool _calibrationDone = false;
 
-  void _advance() {
-    if (_currentStep < kOnboardingStepCalibration) {
-      setState(() => _currentStep++);
-    } else {
-      // Onboarding complete — navigate to main app.
-      Navigator.of(context).pushReplacementNamed('/home');
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _restoreStep());
+  }
+
+  void _restoreStep() {
+    final config = ref.read(deviceConfigProvider).valueOrNull;
+    if (config != null && config.lastCompletedOnboardingStep > 0) {
+      setState(() {
+        _currentStep = OnboardingStep.fromIndex(
+          config.lastCompletedOnboardingStep
+              .clamp(0, OnboardingStep.values.length - 1),
+        );
+      });
     }
+  }
+
+  Future<void> _advance() async {
+    final notifier = ref.read(deviceConfigProvider.notifier);
+    if (_currentStep == OnboardingStep.calibration) {
+      await notifier.completeOnboarding();
+      if (mounted) Navigator.of(context).pushReplacementNamed('/home');
+      return;
+    }
+    await notifier.setOnboardingStep(_currentStep.index + 1);
+    setState(() {
+      _currentStep = OnboardingStep.values[_currentStep.index + 1];
+      _levelConfirmed = false;
+    });
+  }
+
+  bool _canAdvance() {
+    return switch (_currentStep) {
+      OnboardingStep.level => _levelConfirmed,
+      OnboardingStep.calibration => _calibrationDone ||
+          ref.read(calibrationProvider).isCalibrationValid(),
+      _ => true,
+    };
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_stepTitle()),
-      ),
-      body: _buildStep(),
+      appBar: AppBar(title: Text(_stepTitle(l10n))),
+      body: _buildStep(l10n),
       bottomNavigationBar: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            if (_currentStep > kOnboardingStepWelcome)
+            if (_currentStep != OnboardingStep.welcome)
               TextButton(
-                onPressed: () => setState(() => _currentStep--),
-                child: const Text('Back'),
+                onPressed: () async {
+                  await ref
+                      .read(deviceConfigProvider.notifier)
+                      .setOnboardingStep(_currentStep.index - 1);
+                  setState(
+                      () => _currentStep = OnboardingStep.values[_currentStep.index - 1]);
+                },
+                child: Text(l10n.back),
               )
             else
               const SizedBox.shrink(),
             ElevatedButton(
-              onPressed: _advance,
-              child: Text(_currentStep < kOnboardingStepCalibration
-                  ? 'Next'
-                  : 'Start Measuring'),
+              onPressed: _canAdvance() ? _advance : null,
+              child: Text(_currentStep == OnboardingStep.calibration
+                  ? l10n.startMeasuring
+                  : l10n.next),
             ),
           ],
         ),
@@ -65,59 +106,47 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     );
   }
 
-  String _stepTitle() {
-    switch (_currentStep) {
-      case kOnboardingStepWelcome:
-        return 'Welcome';
-      case kOnboardingStepHardware:
-        return 'Hardware Checklist';
-      case kOnboardingStepDevice:
-        return 'Select Audio Interface';
-      case kOnboardingStepMains:
-        return 'Mains Frequency';
-      case kOnboardingStepLevel:
-        return 'Level Check';
-      case kOnboardingStepCalibration:
-        return 'Chain Calibration';
-      default:
-        return '';
-    }
-  }
+  String _stepTitle(AppLocalizations l10n) => switch (_currentStep) {
+        OnboardingStep.welcome => l10n.onboardingWelcomeTitle,
+        OnboardingStep.hardware => l10n.onboardingHardwareTitle,
+        OnboardingStep.device => l10n.onboardingDeviceTitle,
+        OnboardingStep.mains => l10n.onboardingMainsTitle,
+        OnboardingStep.level => l10n.onboardingLevelTitle,
+        OnboardingStep.calibration => l10n.onboardingCalibrationTitle,
+      };
 
-  Widget _buildStep() {
-    switch (_currentStep) {
-      case kOnboardingStepWelcome:
-        return _WelcomeStep();
-      case kOnboardingStepHardware:
-        return _HardwareChecklistStep();
-      case kOnboardingStepDevice:
-        return _DeviceSelectionStep();
-      case kOnboardingStepMains:
-        return _MainsFrequencyStep();
-      case kOnboardingStepLevel:
-        return _LevelCheckStep();
-      case kOnboardingStepCalibration:
-        return _ChainCalibrationStep();
-      default:
-        return const SizedBox.shrink();
-    }
-  }
+  Widget _buildStep(AppLocalizations l10n) => switch (_currentStep) {
+        OnboardingStep.welcome => _WelcomeStep(l10n: l10n),
+        OnboardingStep.hardware => const _HardwareChecklistStep(),
+        OnboardingStep.device => const _DeviceSelectionStep(),
+        OnboardingStep.mains => const _MainsFrequencyStep(),
+        OnboardingStep.level => _LevelCheckStep(
+            onConfirmed: (v) => setState(() => _levelConfirmed = v),
+          ),
+        OnboardingStep.calibration => _ChainCalibrationStep(
+            onSuccess: () => setState(() => _calibrationDone = true),
+          ),
+      };
 }
 
+// ─── Step widgets ─────────────────────────────────────────────────────────────
+
 class _WelcomeStep extends StatelessWidget {
+  final AppLocalizations l10n;
+  const _WelcomeStep({required this.l10n});
+
   @override
   Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.all(24.0),
+    return Padding(
+      padding: const EdgeInsets.all(24.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Welcome',
-              style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
-          SizedBox(height: 16),
-          Text(
-              'Measure the resonance frequency of guitar pickups using your audio interface.',
-              style: TextStyle(fontSize: 16)),
+          Text(l10n.onboardingWelcomeTitle,
+              style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+          Text(l10n.onboardingWelcomeSubtitle,
+              style: const TextStyle(fontSize: 16)),
         ],
       ),
     );
@@ -125,6 +154,8 @@ class _WelcomeStep extends StatelessWidget {
 }
 
 class _HardwareChecklistStep extends StatefulWidget {
+  const _HardwareChecklistStep();
+
   @override
   State<_HardwareChecklistStep> createState() => _HardwareChecklistStepState();
 }
@@ -152,52 +183,183 @@ class _HardwareChecklistStepState extends State<_HardwareChecklistStep> {
   }
 }
 
-class _DeviceSelectionStep extends StatelessWidget {
+class _DeviceSelectionStep extends ConsumerWidget {
+  const _DeviceSelectionStep();
+
   @override
-  Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.all(24.0),
+  Widget build(BuildContext context, WidgetRef ref) {
+    final devicesAsync = ref.watch(availableDevicesProvider);
+    final config = ref.watch(deviceConfigProvider).valueOrNull;
+
+    return Padding(
+      padding: const EdgeInsets.all(24.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Select your audio interface from the list below.'),
-          SizedBox(height: 16),
-          // DevicePicker widget will be wired in Phase 2.
-          Placeholder(fallbackHeight: 80),
+          const Text('Select your audio interface from the list below.',
+              style: TextStyle(fontSize: 16)),
+          const SizedBox(height: 16),
+          devicesAsync.when(
+            data: (devices) => DevicePicker(
+              devices: devices,
+              selectedUid: config?.deviceUid,
+              onChanged: (uid) async {
+                if (uid == null) return;
+                final device = devices.firstWhere((d) => d.uid == uid);
+                await ref
+                    .read(audioEnginePlatformProvider)
+                    .setDevice(uid);
+                await ref.read(deviceConfigProvider.notifier).setDevice(
+                    uid, device.name, device.nativeSampleRate.toInt());
+              },
+            ),
+            loading: () => const CircularProgressIndicator(),
+            error: (e, _) => Text('Error loading devices: $e',
+                style: const TextStyle(color: Colors.red)),
+          ),
+          if (config != null && config.deviceUid.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text('Selected: ${config.deviceName}',
+                style: Theme.of(context).textTheme.bodySmall),
+          ],
         ],
       ),
     );
   }
 }
 
-class _MainsFrequencyStep extends StatelessWidget {
+class _MainsFrequencyStep extends ConsumerStatefulWidget {
+  const _MainsFrequencyStep();
+
+  @override
+  ConsumerState<_MainsFrequencyStep> createState() =>
+      _MainsFrequencyStepState();
+}
+
+class _MainsFrequencyStepState extends ConsumerState<_MainsFrequencyStep> {
+  bool _measuring = false;
+  String? _result;
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _measure() async {
+    setState(() { _measuring = true; _result = null; });
+    try {
+      final hz = await ref
+          .read(calibrationProvider)
+          .measureMainsFrequency(ref.read(sweepConfigProvider));
+      await ref.read(deviceConfigProvider.notifier).setMainsHz(hz);
+      setState(() => _result = '${hz.toStringAsFixed(1)} Hz detected');
+    } catch (e) {
+      setState(() => _result = 'Could not detect — using default');
+    } finally {
+      setState(() => _measuring = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.all(24.0),
+    final config = ref.watch(deviceConfigProvider).valueOrNull;
+    final current = config?.measuredMainsHz ?? 50.0;
+
+    return Padding(
+      padding: const EdgeInsets.all(24.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Measure your local mains frequency for accurate hum suppression.'),
-          SizedBox(height: 16),
-          Placeholder(fallbackHeight: 80),
+          const Text('Measure your local mains frequency for accurate hum suppression.',
+              style: TextStyle(fontSize: 16)),
+          const SizedBox(height: 16),
+          Row(children: [
+            _FreqChip(
+                label: '50 Hz',
+                selected: current == 50.0,
+                onTap: () async => ref
+                    .read(deviceConfigProvider.notifier)
+                    .setMainsHz(50.0)),
+            const SizedBox(width: 8),
+            _FreqChip(
+                label: '60 Hz',
+                selected: current == 60.0,
+                onTap: () async => ref
+                    .read(deviceConfigProvider.notifier)
+                    .setMainsHz(60.0)),
+          ]),
+          const SizedBox(height: 12),
+          ElevatedButton.icon(
+            icon: _measuring
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.graphic_eq),
+            label: Text(_measuring ? 'Measuring…' : 'Auto-detect'),
+            onPressed: _measuring ? null : _measure,
+          ),
+          if (_result != null) ...[
+            const SizedBox(height: 8),
+            Text(_result!, style: Theme.of(context).textTheme.bodySmall),
+          ],
+          const SizedBox(height: 12),
+          Text('Current: ${current.toStringAsFixed(1)} Hz',
+              style: Theme.of(context).textTheme.bodySmall),
         ],
       ),
     );
   }
 }
 
-class _LevelCheckStep extends StatelessWidget {
+class _FreqChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  const _FreqChip(
+      {required this.label, required this.selected, required this.onTap});
+
   @override
   Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.all(24.0),
+    return FilterChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: (_) => onTap(),
+    );
+  }
+}
+
+class _LevelCheckStep extends ConsumerWidget {
+  final ValueChanged<bool> onConfirmed;
+  const _LevelCheckStep({required this.onConfirmed});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = AppLocalizations.of(context)!;
+    final levelAsync = ref.watch(levelCheckToneProvider);
+
+    return Padding(
+      padding: const EdgeInsets.all(24.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Target: −12 dBFS. Mark the headphone knob position once level is correct.'),
-          SizedBox(height: 16),
-          Placeholder(fallbackHeight: 80),
+          Text(l10n.levelCheckTarget, style: const TextStyle(fontSize: 16)),
+          const SizedBox(height: 20),
+          levelAsync.when(
+            data: (dbfs) => LevelMeter(dbfs: dbfs),
+            loading: () => const CircularProgressIndicator(),
+            error: (e, _) => Text('Level meter error: $e',
+                style: const TextStyle(color: Colors.red)),
+          ),
+          const SizedBox(height: 20),
+          CheckboxListTile(
+            title: const Text('Level is correct (−12 dBFS)'),
+            value: false,
+            onChanged: (v) => onConfirmed(v ?? false),
+            controlAffinity: ListTileControlAffinity.leading,
+          ),
         ],
       ),
     );
@@ -205,18 +367,11 @@ class _LevelCheckStep extends StatelessWidget {
 }
 
 class _ChainCalibrationStep extends StatelessWidget {
+  final VoidCallback? onSuccess;
+  const _ChainCalibrationStep({this.onSuccess});
+
   @override
   Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.all(24.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Replace the pickup with a 10 kΩ resistor, then tap Calibrate.'),
-          SizedBox(height: 16),
-          Placeholder(fallbackHeight: 80),
-        ],
-      ),
-    );
+    return CalibrationFlowWidget(onSuccess: onSuccess);
   }
 }

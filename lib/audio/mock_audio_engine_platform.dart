@@ -88,6 +88,12 @@ class MockAudioEnginePlatform extends AudioEnginePlatformInterface {
   }
 
   @override
+  Future<void> startLevelCheckTone() => startLevelMeter();
+
+  @override
+  Future<void> stopLevelCheckTone() => stopLevelMeter();
+
+  @override
   Stream<double> get levelMeterStream => _levelMeterController.stream;
 
   @override

@@ -9,6 +9,8 @@ class MainFlutterWindow: NSWindow {
     self.setFrame(windowFrame, display: true)
 
     RegisterGeneratedPlugins(registry: flutterViewController)
+    AudioEnginePlugin.register(
+      with: flutterViewController.registrar(forPlugin: "AudioEnginePlugin"))
 
     super.awakeFromNib()
   }

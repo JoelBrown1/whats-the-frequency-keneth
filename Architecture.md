@@ -110,6 +110,10 @@ The Dart facade (`AudioEngineMethodChannel`) and the native implementations (Swi
 | `cancelCapture` | — | `void` | — |
 | `startLevelMeter` | — | `void` | — |
 | `stopLevelMeter` | — | `void` | — |
+| `startLevelCheckTone` | — | `void` | — |
+| `stopLevelCheckTone` | — | `void` | — |
+
+> `startLevelCheckTone` plays a 2-second looped 1 kHz sine at −6 dBFS through the headphone output while simultaneously enabling the level meter tap on input channel 1. Use this during the onboarding level check step and the setup screen live meter. `startLevelMeter` alone (no tone) is used during calibration pre-checks where the exciter should be silent.
 
 > `runCapture` is a synchronous-style call that blocks until capture is complete (sweep duration + post-roll). The native side manages the full play+record lifecycle. Dart awaits the `Future` — no polling required.
 
@@ -232,7 +236,7 @@ class Pickup {
   - OS audio enhancements disabled
   - Headphone knob set and marked
 
-**Level check tool:** Routes a 1 kHz sine tone through the headphone output, captures on input channel 1, and displays a real-time dBFS meter. Guide the user to ~-12 dBFS. Once the correct level is confirmed the user marks the knob and proceeds to chain calibration.
+**Level check tool:** Calls `startLevelCheckTone` (`AudioEnginePlatformInterface`), which plays a 2-second looped 1 kHz sine at −6 dBFS through the headphone output while simultaneously tapping input channel 1 for level metering. The `levelCheckToneProvider` (Riverpod `StreamProvider.autoDispose`) starts the tone on subscribe and stops it on dispose, feeding the `LevelMeter` widget via the `levelMeterStream` EventChannel. Guide the user to ~-12 dBFS. Once the correct level is confirmed the user marks the knob and proceeds to chain calibration.
 
 **Chain calibration (`CalibrationService`):**
 
@@ -296,13 +300,15 @@ Error types:
 | `DeviceError` | Device disconnected, sample rate mismatch | Prompt reconnect → back to `Idle` |
 | `FatalError` | Plugin crash, OOM | Log diagnostic, require app restart |
 
+**Checkpoint persistence:** `CaptureCheckpointService` writes each accepted capture atomically to `{appSupportDir}/checkpoints/{index}.f32` (raw Float32LE PCM) plus `meta.json` (serialised `SweepConfig`). On measurement start, if a checkpoint exists and the stored config matches the current config, previously-captured sweeps are loaded and the loop resumes from `pass = preloaded.length`. If the config has changed the checkpoint is discarded. The checkpoint is cleared on successful DSP completion and on user cancel.
+
 Capture flow:
 
 0. **Sweep clipping check:** play a 1-second excerpt of the sweep at maximum amplitude and capture on input channel 1; if any sample exceeds -1 dBFS, abort with `RecoverableError` — prompt the user to turn the headphone knob down slightly and recalibrate
 1. Pre-roll silence (512 ms) to flush interface buffers
 2. Schedule playback and input tap to start on the same `AVAudioTime` render cycle (sample-accurate co-start)
 3. Stop after sweep duration + post-roll (500 ms)
-4. Cross-correlate captured signal against reference to verify sweep alignment. **Sweep 0 handling:** the first sweep has no prior reference — its offset is stored unconditionally as the baseline. Before storing, verify the offset falls within a physically plausible range (e.g. ±500 samples of the expected USB round-trip latency); if outside this range, discard sweep 0 and retry rather than anchoring all subsequent sweeps to a bad reference. Sweeps 1–N are discarded and retried if offset differs from sweep 0 by more than ±2 samples.
+4. **Cross-correlation alignment** (`computeAlignmentOffset` in `dsp_isolate.dart`, run via `Isolate.run()`): FFT-based cross-correlation `C = IFFT(FFT(capture) × conj(FFT(inverseFilter)))`, peak searched within ±500 samples. **Sweep 0 handling:** the first sweep's offset is validated to be within ±500 samples (plausible USB round-trip range); if outside, sweep 0 is discarded and retried without counting the pass. The validated offset is stored as the baseline. Sweeps 1–N are discarded and retried if offset differs from the baseline by more than ±2 samples.
 5. Validate sample count; flag dropouts
 6. N-sweep averaging: accumulate aligned captures in time domain before FFT
 
@@ -311,9 +317,10 @@ Dropout detection is mandatory — USB audio devices can glitch. The app must wa
 **Hum mitigation (N ≥ 4 sweeps):** Use golden-ratio sweep spacing to cancel mains harmonics across the average:
 
 ```dart
-// powerLineHz is the measured value from DeviceConfig, not a nominal constant
-final td = (1 / powerLineHz) / goldenRatio; // ~12.4 ms for 50 Hz
-final pauseBetweenSweeps = 1000 + (td * 1000).round(); // ms
+// mainsHz is DeviceConfig.measuredMainsHz (measured, not a nominal constant)
+const phi = 1.6180339887;
+final interSweepMs = 1000 + ((1.0 / mainsHz) / phi * 1000).round();
+await Future<void>.delayed(Duration(milliseconds: interSweepMs));
 ```
 
 ### 4. DSP Pipeline
@@ -500,9 +507,11 @@ The `com.apple.security.device.audio-input` and `com.apple.security.device.usb` 
 ```xml
 <key>com.apple.security.files.user-selected.read-write</key>
 <true/>
+<key>com.apple.security.files.downloads.read-write</key>
+<true/>
 ```
 
-Without it, `NSSavePanel` is blocked under App Sandbox and the only option is saving the CSV silently into the app container — invisible to the user in Finder. Add this entitlement to both `Release.entitlements` and `DebugProfile.entitlements` in Phase 4 when CSV export is implemented. If the Mac App Store route is pursued, this entitlement requires a usage justification in the App Store review notes.
+`user-selected.read-write` allows `NSSavePanel`; without it the panel is blocked under App Sandbox. `downloads.read-write` is required for writing directly to `~/Downloads` via `getDownloadsDirectory()` — the app's primary CSV export path. Both are present in `Release.entitlements` and `DebugProfile.entitlements`. If the Mac App Store route is pursued, both entitlements require a usage justification in the App Store review notes.
 
 #### Apple Privacy Manifest (`PrivacyInfo.xcprivacy`)
 

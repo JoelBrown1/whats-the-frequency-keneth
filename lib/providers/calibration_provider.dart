@@ -4,13 +4,14 @@
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:whats_the_frequency/calibration/calibration_service.dart';
+import 'package:whats_the_frequency/providers/audio_engine_platform_provider.dart';
 import 'package:whats_the_frequency/providers/dsp_provider.dart';
 
 final calibrationProvider = Provider<CalibrationService>((ref) {
-  final service = CalibrationService();
-  // When this provider is invalidated (e.g. after recalibration),
-  // also invalidate dspProvider so stale pipeline results are cleared.
+  final platform = ref.watch(audioEnginePlatformProvider);
+  final service = CalibrationService(platform: platform);
   ref.onDispose(() {
+    service.sweepProgress.dispose();
     ref.invalidate(dspProvider);
   });
   return service;

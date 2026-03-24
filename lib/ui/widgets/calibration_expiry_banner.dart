@@ -3,6 +3,7 @@
 // Provides a one-tap shortcut to recalibrate.
 
 import 'package:flutter/material.dart';
+import 'package:whats_the_frequency/l10n/l10n.dart';
 
 class CalibrationExpiryBanner extends StatelessWidget {
   final VoidCallback onRecalibrate;
@@ -11,14 +12,15 @@ class CalibrationExpiryBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return MaterialBanner(
-      content: const Text('Calibration has expired. Tap to recalibrate.'),
+      content: Text(l10n.calibrationExpiredWarning),
       backgroundColor: Colors.orange.shade900,
       actions: [
         TextButton(
           onPressed: onRecalibrate,
-          child: const Text('Recalibrate',
-              style: TextStyle(color: Colors.white)),
+          child: Text(l10n.recalibrate,
+              style: const TextStyle(color: Colors.white)),
         ),
       ],
     );

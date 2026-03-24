@@ -83,6 +83,16 @@ class AudioEngineMethodChannel extends AudioEnginePlatformInterface {
   }
 
   @override
+  Future<void> startLevelCheckTone() async {
+    await _methodChannel.invokeMethod<void>('startLevelCheckTone');
+  }
+
+  @override
+  Future<void> stopLevelCheckTone() async {
+    await _methodChannel.invokeMethod<void>('stopLevelCheckTone');
+  }
+
+  @override
   Stream<double> get levelMeterStream =>
       _levelMeterChannel.receiveBroadcastStream().cast<double>();
 

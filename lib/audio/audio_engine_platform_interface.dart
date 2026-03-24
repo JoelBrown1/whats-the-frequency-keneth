@@ -26,18 +26,6 @@ class AudioDeviceDescriptor {
 }
 
 abstract class AudioEnginePlatformInterface {
-  static AudioEnginePlatformInterface? _instance;
-
-  static AudioEnginePlatformInterface get instance {
-    assert(_instance != null,
-        'AudioEnginePlatformInterface.instance must be set before use.');
-    return _instance!;
-  }
-
-  static set instance(AudioEnginePlatformInterface value) {
-    _instance = value;
-  }
-
   /// Enumerate available audio devices.
   Future<List<AudioDeviceDescriptor>> getAvailableDevices();
 
@@ -63,6 +51,14 @@ abstract class AudioEnginePlatformInterface {
 
   /// Stop the level meter stream.
   Future<void> stopLevelMeter();
+
+  /// Play a 1 kHz sine tone through the output and start level metering.
+  /// Used for the level-check step so the user adjusts the headphone knob
+  /// against the actual signal chain, not ambient noise.
+  Future<void> startLevelCheckTone();
+
+  /// Stop the level-check tone and level metering.
+  Future<void> stopLevelCheckTone();
 
   /// Stream of dBFS level meter values (~10 Hz).
   Stream<double> get levelMeterStream;

@@ -10,6 +10,8 @@ import 'dart:math';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:whats_the_frequency/dsp/models/frequency_response.dart';
+import 'package:whats_the_frequency/dsp/models/resonance_search_band.dart';
+import 'package:whats_the_frequency/ui/widgets/search_band_overlay.dart';
 
 const double _minFreq = 100.0;
 const double _maxFreq = 20000.0;
@@ -26,8 +28,17 @@ double chartXToFrequency(double chartX, double chartWidth) {
 
 class FrequencyResponseChart extends StatefulWidget {
   final FrequencyResponse? frequencyResponse;
+  final FrequencyResponse? overlayResponse;
+  final String? overlayLabel;
+  final ResonanceSearchBand? searchBand;
 
-  const FrequencyResponseChart({super.key, this.frequencyResponse});
+  const FrequencyResponseChart({
+    super.key,
+    this.frequencyResponse,
+    this.overlayResponse,
+    this.overlayLabel,
+    this.searchBand,
+  });
 
   @override
   State<FrequencyResponseChart> createState() => _FrequencyResponseChartState();
@@ -36,14 +47,9 @@ class FrequencyResponseChart extends StatefulWidget {
 class _FrequencyResponseChartState extends State<FrequencyResponseChart> {
   double? _cursorHz;
   double? _cursorDb;
+  double? _cursorOverlayDb;
 
-  void _handleTapDown(TapDownDetails details, BoxConstraints constraints) {
-    final hz = chartXToFrequency(
-        details.localPosition.dx, constraints.maxWidth);
-    // Find nearest bin.
-    final response = widget.frequencyResponse;
-    if (response == null) return;
-
+  double? _nearestDb(FrequencyResponse response, double hz) {
     double nearestDb = 0;
     double nearestDist = double.infinity;
     for (int i = 0; i < response.frequencyHz.length; i++) {
@@ -53,9 +59,20 @@ class _FrequencyResponseChartState extends State<FrequencyResponseChart> {
         nearestDb = response.magnitudeDb[i];
       }
     }
+    return nearestDb;
+  }
+
+  void _handleTapDown(TapDownDetails details, BoxConstraints constraints) {
+    final hz = chartXToFrequency(
+        details.localPosition.dx, constraints.maxWidth);
+    final response = widget.frequencyResponse;
+    if (response == null) return;
     setState(() {
       _cursorHz = hz;
-      _cursorDb = nearestDb;
+      _cursorDb = _nearestDb(response, hz);
+      _cursorOverlayDb = widget.overlayResponse != null
+          ? _nearestDb(widget.overlayResponse!, hz)
+          : null;
     });
   }
 
@@ -89,11 +106,24 @@ class _FrequencyResponseChartState extends State<FrequencyResponseChart> {
                         color: Colors.black.withValues(alpha: 0.7),
                         borderRadius: BorderRadius.circular(4),
                       ),
-                      child: Text(
-                        '${_cursorHz!.toStringAsFixed(0)} Hz  '
-                        '${_cursorDb!.toStringAsFixed(1)} dB',
-                        style: const TextStyle(
-                            color: Colors.white, fontSize: 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '${_cursorHz!.toStringAsFixed(0)} Hz  '
+                            '${_cursorDb!.toStringAsFixed(1)} dB',
+                            style: const TextStyle(
+                                color: Colors.tealAccent, fontSize: 12),
+                          ),
+                          if (_cursorOverlayDb != null)
+                            Text(
+                              '${widget.overlayLabel ?? 'Overlay'}: '
+                              '${_cursorOverlayDb!.toStringAsFixed(1)} dB',
+                              style: const TextStyle(
+                                  color: Colors.orangeAccent, fontSize: 12),
+                            ),
+                        ],
                       ),
                     ),
                   ),
@@ -118,7 +148,18 @@ class _FrequencyResponseChartState extends State<FrequencyResponseChart> {
       }
     }
 
-    return LineChart(
+    final overlaySpots = <FlSpot>[];
+    final overlay = widget.overlayResponse;
+    if (overlay != null) {
+      for (int i = 0; i < overlay.frequencyHz.length; i++) {
+        final f = overlay.frequencyHz[i];
+        if (f >= _minFreq && f <= _maxFreq) {
+          overlaySpots.add(FlSpot(_log10(f), overlay.magnitudeDb[i]));
+        }
+      }
+    }
+
+    final chart = LineChart(
       LineChartData(
         lineBarsData: [
           LineChartBarData(
@@ -128,6 +169,15 @@ class _FrequencyResponseChartState extends State<FrequencyResponseChart> {
             color: Colors.tealAccent,
             barWidth: 1.5,
           ),
+          if (overlaySpots.isNotEmpty)
+            LineChartBarData(
+              spots: overlaySpots,
+              isCurved: false,
+              dotData: const FlDotData(show: false),
+              color: Colors.orangeAccent,
+              barWidth: 1.5,
+              dashArray: [4, 4],
+            ),
         ],
         titlesData: FlTitlesData(
           leftTitles: AxisTitles(
@@ -166,6 +216,20 @@ class _FrequencyResponseChartState extends State<FrequencyResponseChart> {
         borderData: FlBorderData(show: true),
         lineTouchData: const LineTouchData(enabled: false),
       ),
+    );
+
+    final band = widget.searchBand;
+    if (band == null) return chart;
+
+    return Stack(
+      children: [
+        SearchBandOverlay(
+          band: band,
+          chartMinHz: _minFreq,
+          chartMaxHz: _maxFreq,
+        ),
+        chart,
+      ],
     );
   }
 }

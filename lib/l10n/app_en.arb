@@ -198,5 +198,133 @@
   "cancel": "Cancel",
   "@cancel": {
     "description": "Cancel button"
+  },
+
+  "measureArming": "Arming…",
+  "@measureArming": {
+    "description": "Active measurement state: arming"
+  },
+
+  "measureCapturing": "Capturing…",
+  "@measureCapturing": {
+    "description": "Active measurement state: capturing"
+  },
+
+  "measureAnalysing": "Analysing…",
+  "@measureAnalysing": {
+    "description": "Active measurement state: analysing"
+  },
+
+  "measureWorking": "Working…",
+  "@measureWorking": {
+    "description": "Active measurement state: generic fallback"
+  },
+
+  "measurePlayingSweep": "Playing sweep {pass} of {total}…",
+  "@measurePlayingSweep": {
+    "description": "Active measurement state: playing sweep pass N of M",
+    "placeholders": {
+      "pass": {"type": "int"},
+      "total": {"type": "int"}
+    }
+  },
+
+  "discardResultTitle": "Discard result?",
+  "@discardResultTitle": {
+    "description": "Title for the discard result confirmation dialog"
+  },
+
+  "discardResultContent": "This measurement will not be saved. Are you sure?",
+  "@discardResultContent": {
+    "description": "Body text for the discard result confirmation dialog"
+  },
+
+  "overlayMeasurementClear": "Clear",
+  "@overlayMeasurementClear": {
+    "description": "Button to clear the overlay measurement"
+  },
+
+  "saveMeasurementTitle": "Save measurement",
+  "@saveMeasurementTitle": {
+    "description": "Title for the save measurement dialog"
+  },
+
+  "pickupLabelField": "Pickup label",
+  "@pickupLabelField": {
+    "description": "Label for the pickup name text field"
+  },
+
+  "pickupLabelHint": "e.g. PAF neck",
+  "@pickupLabelHint": {
+    "description": "Hint text for the pickup name text field"
+  },
+
+  "linkExistingPickup": "Link to existing pickup (optional):",
+  "@linkExistingPickup": {
+    "description": "Label above the existing pickup dropdown in save dialog"
+  },
+
+  "noneOption": "None",
+  "@noneOption": {
+    "description": "None option in dropdowns"
+  },
+
+  "createNewPickup": "Create new pickup",
+  "@createNewPickup": {
+    "description": "Checkbox label to create a new pickup entry"
+  },
+
+  "historyTitle": "History",
+  "@historyTitle": {
+    "description": "History screen title"
+  },
+
+  "historySelectMeasurement": "Select measurement",
+  "@historySelectMeasurement": {
+    "description": "History screen title when in selection mode"
+  },
+
+  "historyUnnamedPickup": "Unnamed pickup",
+  "@historyUnnamedPickup": {
+    "description": "Placeholder name for pickups with no label"
+  },
+
+  "startMeasuring": "Start Measuring",
+  "@startMeasuring": {
+    "description": "Final button in onboarding to begin measuring"
+  },
+
+  "setupAudioInterfaceSection": "Audio Interface",
+  "@setupAudioInterfaceSection": {
+    "description": "Section heading for the audio interface picker in setup screen"
+  },
+
+  "errorDspFailed": "Signal processing failed. Please retry.",
+  "@errorDspFailed": {
+    "description": "Error: DSP pipeline threw during analysis"
+  },
+
+  "calibrateButton": "Calibrate",
+  "@calibrateButton": {
+    "description": "Button label to start chain calibration"
+  },
+
+  "calibrationSweeping": "Sweeping… (pass {pass} of {total})",
+  "@calibrationSweeping": {
+    "description": "Progress label during chain calibration sweep",
+    "placeholders": {
+      "pass": {"type": "int"},
+      "total": {"type": "int"}
+    }
+  },
+
+  "calibrationFailed": "Calibration failed",
+  "@calibrationFailed": {
+    "description": "Title shown when chain calibration fails"
+  },
+
+  "calibrationTryAgain": "Try again",
+  "@calibrationTryAgain": {
+    "description": "Button to dismiss a calibration error and retry"
   }
 }

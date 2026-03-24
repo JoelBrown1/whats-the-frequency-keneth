@@ -6,10 +6,9 @@
 
 import 'dart:async';
 import 'dart:isolate';
-import 'dart:math';
 
-import 'package:whats_the_frequency/audio/models/capture_result.dart';
-import 'package:whats_the_frequency/audio/models/sweep_config.dart';
+import 'package:whats_the_frequency/dsp/dsp_isolate.dart';
+import 'package:whats_the_frequency/dsp/models/dsp_pipeline_input.dart';
 import 'package:whats_the_frequency/dsp/models/frequency_response.dart';
 
 class DspWorker {
@@ -33,7 +32,7 @@ class DspWorker {
     _cancelSendPort = ports.$2;
   }
 
-  Future<FrequencyResponse> process(CaptureResult capture) async {
+  Future<FrequencyResponse> process(DspPipelineInput input) async {
     if (_busy) {
       throw StateError('DspWorker is busy — await previous process() call first');
     }
@@ -41,7 +40,7 @@ class DspWorker {
     _busyController.add(true);
     try {
       final reply = ReceivePort();
-      _sendPort.send((capture, reply.sendPort));
+      _sendPort.send((input, reply.sendPort));
       final result = await reply.first;
       if (result is FrequencyResponse) {
         return result;
@@ -54,7 +53,6 @@ class DspWorker {
   }
 
   /// Signals the worker to exit the current pipeline early.
-  /// The worker polls its cancel port between each of the 10 pipeline stages.
   void cancel() => _cancelSendPort.send(null);
 
   void dispose() {
@@ -71,48 +69,15 @@ void _workerEntryPoint(SendPort callerSendPort) {
   // Send both ports back to the caller.
   callerSendPort.send((workReceivePort.sendPort, cancelReceivePort.sendPort));
 
-  workReceivePort.listen((message) async {
-    if (message is (CaptureResult, SendPort)) {
-      final (capture, replyPort) = message;
-      final result = await _runPipeline(capture, cancelReceivePort);
-      replyPort.send(result);
+  workReceivePort.listen((message) {
+    if (message is (DspPipelineInput, SendPort)) {
+      final (input, replyPort) = message;
+      try {
+        final result = runPipeline(input);
+        replyPort.send(result);
+      } catch (e) {
+        replyPort.send(StateError(e.toString()));
+      }
     }
   });
-}
-
-/// Run the DSP pipeline. Polls cancelReceivePort between stages.
-/// Phase 0 stub — full implementation in Phase 1.
-Future<FrequencyResponse> _runPipeline(
-    CaptureResult capture, ReceivePort cancelReceivePort) async {
-  final freqAxis = computeFrequencyAxis();
-  final magnitudeDb = List<double>.filled(kFrequencyBins, 0.0);
-
-  // Simulate a 4 kHz resonance peak in the synthetic output.
-  for (int i = 0; i < kFrequencyBins; i++) {
-    final f = freqAxis[i];
-    const f0 = 4000.0;
-    const q = 3.0;
-    const bandwidth = f0 / q;
-    final response =
-        1.0 / (1.0 + ((f - f0) * (f - f0)) / (bandwidth * bandwidth / 4.0));
-    magnitudeDb[i] =
-        response > 1e-10 ? 20.0 * log(response) / ln10 : -100.0;
-  }
-
-  const primaryPeak = ResonancePeak(
-    frequencyHz: 4000.0,
-    magnitudeDb: 0.0,
-    qFactor: 3.0,
-    fLowHz: 4000.0 / (1 + 1 / 6.0),
-    fHighHz: 4000.0 * (1 + 1 / 6.0),
-  );
-
-  return FrequencyResponse(
-    frequencyHz: freqAxis,
-    magnitudeDb: magnitudeDb,
-    peaks: const [primaryPeak],
-    primaryPeak: primaryPeak,
-    sweepConfig: const SweepConfig(),
-    analyzedAt: DateTime.now(),
-  );
 }

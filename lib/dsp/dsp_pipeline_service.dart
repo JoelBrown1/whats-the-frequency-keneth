@@ -1,51 +1,60 @@
 // lib/dsp/dsp_pipeline_service.dart
-// Stub DSP pipeline service — full implementation in Phase 1.
-// Defines the interface used by DspWorker and providers.
+// DSP pipeline service — dispatches work to an isolate via Isolate.run().
+//
+// Pipeline stages (implemented in dsp_isolate.dart):
+// 1. Deconvolution  2. Hann window  3. FFT → H_dut
+// 4. Chain correction (Tikhonov)  5. Magnitude (dB)
+// 6. Log-freq interpolation → 361 bins  7. Freq taper (>15 kHz)
+// 8. 1/3-octave smoothing  9. Peak detection  10. Q-factor
 
-import 'package:whats_the_frequency/audio/models/sweep_config.dart';
+import 'dart:isolate';
+
 import 'package:whats_the_frequency/audio/models/capture_result.dart';
+import 'package:whats_the_frequency/audio/models/sweep_config.dart';
 import 'package:whats_the_frequency/calibration/models/chain_calibration.dart';
+import 'package:whats_the_frequency/dsp/dsp_isolate.dart';
+import 'package:whats_the_frequency/dsp/models/dsp_pipeline_input.dart';
 import 'package:whats_the_frequency/dsp/models/frequency_response.dart';
 import 'package:whats_the_frequency/dsp/models/resonance_search_band.dart';
 
 class DspPipelineService {
-  /// Process a captured signal through the full pipeline:
-  /// 1. Deconvolution
-  /// 2. Window (Hann)
-  /// 3. FFT
-  /// 4. Chain correction (divide by H_chain)
-  /// 5. Tikhonov regularization
-  /// 6. Magnitude response (dB)
-  /// 7. Frequency taper
-  /// 8. Smoothing
-  /// 9. Peak detection
-  /// 10. Q-factor calculation
-  ///
-  /// Returns a FrequencyResponse with 361 log-spaced bins.
-  /// Phase 0: stub returns a flat response.
+  /// Process a single captured signal through the full 10-stage pipeline.
   Future<FrequencyResponse> process(
     CaptureResult capture,
     ChainCalibration calibration,
     SweepConfig sweepConfig,
     ResonanceSearchBand searchBand,
+  ) {
+    return processMultiple([capture], calibration, sweepConfig, searchBand);
+  }
+
+  /// Process multiple captures, averaging complex spectra before converting
+  /// to dB. Better noise reduction than averaging the final dB values.
+  Future<FrequencyResponse> processMultiple(
+    List<CaptureResult> captures,
+    ChainCalibration calibration,
+    SweepConfig sweepConfig,
+    ResonanceSearchBand searchBand,
   ) async {
-    // Phase 0 stub — returns synthetic flat response.
-    final freqAxis = computeFrequencyAxis();
-    final magnitudeDb = List<double>.filled(kFrequencyBins, 0.0);
-    final primaryPeak = ResonancePeak(
-      frequencyHz: 4000.0,
-      magnitudeDb: 0.0,
-      qFactor: 3.0,
-      fLowHz: 4000.0 / (1 + 1 / 6.0),
-      fHighHz: 4000.0 * (1 + 1 / 6.0),
-    );
-    return FrequencyResponse(
-      frequencyHz: freqAxis,
-      magnitudeDb: magnitudeDb,
-      peaks: [primaryPeak],
-      primaryPeak: primaryPeak,
-      sweepConfig: sweepConfig,
-      analyzedAt: DateTime.now(),
-    );
+    assert(captures.isNotEmpty, 'At least one capture required');
+
+    // Build per-capture inputs. All are the same config; only samples differ.
+    final inputs = captures
+        .map((c) => DspPipelineInput(
+              capturedSamples: c.samples,
+              sampleRate: sweepConfig.sampleRate,
+              f1Hz: sweepConfig.f1Hz,
+              f2Hz: sweepConfig.f2Hz,
+              durationSeconds: sweepConfig.durationSeconds,
+              preRollMs: sweepConfig.preRollMs,
+              postRollMs: sweepConfig.postRollMs,
+              hChainReal: calibration.hChainReal,
+              hChainImag: calibration.hChainImag,
+              searchBandLowHz: searchBand.lowHz,
+              searchBandHighHz: searchBand.highHz,
+            ))
+        .toList();
+
+    return Isolate.run(() => runPipelineMultiple(inputs));
   }
 }

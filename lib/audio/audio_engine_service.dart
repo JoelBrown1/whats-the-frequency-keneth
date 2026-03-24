@@ -14,6 +14,9 @@ import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:flutter/services.dart';
+
+import '../providers/audio_engine_platform_provider.dart';
 import 'audio_engine_platform_interface.dart';
 import 'models/capture_result.dart';
 import 'models/sweep_config.dart';
@@ -71,9 +74,11 @@ class AudioEngineServiceState {
 class AudioEngineService extends Notifier<AudioEngineServiceState> {
   StreamSubscription<Map<String, dynamic>>? _deviceEventSubscription;
   String? _activeDeviceUid;
+  late AudioEnginePlatformInterface _platform;
 
   @override
   AudioEngineServiceState build() {
+    _platform = ref.watch(audioEnginePlatformProvider);
     _subscribeToDeviceEvents();
     ref.onDispose(() {
       _deviceEventSubscription?.cancel();
@@ -82,9 +87,7 @@ class AudioEngineService extends Notifier<AudioEngineServiceState> {
   }
 
   void _subscribeToDeviceEvents() {
-    _deviceEventSubscription = AudioEnginePlatformInterface.instance
-        .deviceEventStream
-        .listen((event) {
+    _deviceEventSubscription = _platform.deviceEventStream.listen((event) {
       if (event['event'] == 'deviceRemoved' &&
           event['uid'] == _activeDeviceUid) {
         _transitionToDeviceError(
@@ -139,7 +142,7 @@ class AudioEngineService extends Notifier<AudioEngineServiceState> {
     try {
       state = AudioEngineServiceState(state: AudioEngineState.capturing);
 
-      final capture = await AudioEnginePlatformInterface.instance.runCapture(
+      final capture = await _platform.runCapture(
         sweepSamples,
         config.sampleRate,
         config.postRollMs,
@@ -162,7 +165,7 @@ class AudioEngineService extends Notifier<AudioEngineServiceState> {
 
       return capture;
     } on Object catch (e) {
-      final code = e is Exception ? 'CAPTURE_ERROR' : 'CAPTURE_ERROR';
+      final code = e is PlatformException ? e.code : 'CAPTURE_ERROR';
       _transitionToRecoverableError(code, e.toString());
       rethrow;
     }
@@ -178,7 +181,29 @@ class AudioEngineService extends Notifier<AudioEngineServiceState> {
 
   /// Cancel an in-progress capture.
   Future<void> cancelCapture() async {
-    await AudioEnginePlatformInterface.instance.cancelCapture();
+    await _platform.cancelCapture();
     reset();
   }
+
+  /// Transition to recoverableError if the app is backgrounded mid-measurement.
+  /// No-op when not in an active measurement state.
+  void backgroundInterrupted() {
+    if (_isActiveMeasurementState(state.state)) {
+      _transitionToRecoverableError(
+          'APP_BACKGROUNDED', 'App moved to background during measurement.');
+    }
+  }
+
+  /// Transition to recoverableError when DSP processing throws.
+  /// Called after the capture loop succeeds but Isolate.run fails.
+  void processingFailed() {
+    _transitionToRecoverableError(
+        'DSP_FAILED', 'Signal processing failed. Please retry.');
+  }
+
+  static bool _isActiveMeasurementState(AudioEngineState s) =>
+      s == AudioEngineState.armed ||
+      s == AudioEngineState.playing ||
+      s == AudioEngineState.capturing ||
+      s == AudioEngineState.analyzing;
 }
