@@ -23,7 +23,10 @@
 #include <flutter/encodable_value.h>
 
 #include <atomic>
+#include <deque>
+#include <functional>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -121,6 +124,18 @@ class AudioEnginePlugin : public flutter::Plugin,
   ULONG STDMETHODCALLTYPE Release() override { return 1; }
   HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid,
                                             void** ppv) override;
+
+  // ── UI-thread marshalling ─────────────────────────────────────────────────
+  // Background threads (level, capture, COM notification) must not call
+  // EventSink directly. They push a callable onto pending_ and PostMessage
+  // kWmDrainQueue to the Flutter HWND. The top-level window proc delegate
+  // handles kWmDrainQueue on the UI thread and drains the queue.
+  static constexpr UINT kWmDrainQueue = WM_APP + 1;
+  HWND flutter_hwnd_ = nullptr;
+  int proc_delegate_id_ = -1;
+  std::mutex queue_mutex_;
+  std::deque<std::function<void()>> pending_;
+  void DrainQueue();
 
   // ── Helpers ──────────────────────────────────────────────────────────────
   struct DeviceInfo {

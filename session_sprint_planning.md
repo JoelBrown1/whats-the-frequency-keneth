@@ -12,17 +12,17 @@ Tier 1 of Next_steps.md requires a physical Scarlett 2i2, exciter coil, test pic
 
 ---
 
-## Session 1 — Tier 3 Quick Wins (Distribution Blockers)
+## Session 1 — Tier 3 Quick Wins (Distribution Blockers) ✓ COMPLETE
 
 **Goal:** Unblock App Store submission and Windows distribution. All small, self-contained changes.
 
-- [ ] `PrivacyInfo.xcprivacy` — add to `macos/Runner/` declaring `UserDefaults` (CA92.1) and file timestamp APIs (C617.1)
-- [ ] `macos/Runner/Release.entitlements` + `DebugProfile.entitlements` — confirm `user-selected.read-write` and `downloads.read-write` are present for CSV export
-- [ ] GitHub Actions CI — add `xcrun notarytool submit` and `xcrun stapler staple` steps after `flutter build macos --release`
-- [ ] WASAPI EventSink thread safety — marshal `EmitLevel` and `EmitDeviceEvent` calls in `audio_engine_plugin.cpp` to Flutter engine thread via `PostMessage`
+- [x] `PrivacyInfo.xcprivacy` — already present in `macos/Runner/` with correct reason codes (CA92.1, C617.1)
+- [x] `macos/Runner/Release.entitlements` + `DebugProfile.entitlements` — `user-selected.read-write` and `downloads.read-write` already present
+- [x] GitHub Actions CI — `xcrun notarytool submit` + `xcrun stapler staple` added; gated to `main` branch push only
+- [x] WASAPI EventSink thread safety — `EmitLevel` and `EmitDeviceEvent` now marshal via `pending_` queue + `PostMessage(flutter_hwnd_, kWmDrainQueue, ...)`; drained on UI thread via `RegisterTopLevelWindowProcDelegate`
 
-**Files likely touched:**
-`macos/Runner/PrivacyInfo.xcprivacy` (new), `macos/Runner/Release.entitlements`, `macos/Runner/DebugProfile.entitlements`, `.github/workflows/ci.yml` (new or existing), `windows/runner/audio_engine_plugin.cpp`
+**Implementation note — WASAPI marshalling:**
+Background threads push a `std::function<void()>` onto `pending_` (mutex-protected `std::deque`) then `PostMessage` `kWmDrainQueue = WM_APP + 1` to the Flutter HWND. A `TopLevelWindowProcDelegate` registered in the constructor handles `kWmDrainQueue` on the UI thread and calls `DrainQueue()`. The Flutter HWND is cached on the first delegate invocation. Delegate is unregistered in the destructor.
 
 ---
 

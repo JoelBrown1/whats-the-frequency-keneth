@@ -13,3 +13,18 @@ jobs:
       - run: flutter test --coverage
       - run: flutter analyze
       - run: flutter build macos --release
+      - name: Notarize (release builds on main only)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+          APP_SPECIFIC_PASSWORD: ${{ secrets.APP_SPECIFIC_PASSWORD }}
+        run: |
+          xcrun notarytool submit \
+            "build/macos/Build/Products/Release/whats_the_frequency.app" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$TEAM_ID" \
+            --password "$APP_SPECIFIC_PASSWORD" \
+            --wait
+          xcrun stapler staple \
+            "build/macos/Build/Products/Release/whats_the_frequency.app"

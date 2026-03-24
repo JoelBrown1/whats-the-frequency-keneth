@@ -2,8 +2,9 @@
 // WASAPI platform plugin — exclusive-mode synchronised play+capture.
 //
 // Channel names match the Dart AudioEngineMethodChannel exactly.
-// All EventSink calls are marshalled to the Flutter UI thread via
-// PluginRegistrarWindows::PostTaskCallback.
+// All EventSink calls are marshalled to the Flutter UI thread via a
+// pending_ queue drained by a RegisterTopLevelWindowProcDelegate callback
+// triggered by PostMessage(flutter_hwnd_, kWmDrainQueue, ...).
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -143,9 +144,27 @@ AudioEnginePlugin::AudioEnginePlugin(
         return nullptr;
       });
   device_event_channel_->SetStreamHandler(std::move(device_handler));
+
+  // ── UI-thread drain delegate ───────────────────────────────────────────
+  // Caches the Flutter HWND on first invocation. Drains the pending_ queue
+  // whenever kWmDrainQueue is received, which background threads post after
+  // pushing an event. All EventSink calls therefore execute on the UI thread.
+  proc_delegate_id_ = registrar_->RegisterTopLevelWindowProcDelegate(
+      [this](HWND hwnd, UINT msg, WPARAM, LPARAM)
+          -> std::optional<LRESULT> {
+        if (!flutter_hwnd_) flutter_hwnd_ = hwnd;
+        if (msg == kWmDrainQueue) {
+          DrainQueue();
+          return 0;
+        }
+        return std::nullopt;
+      });
 }
 
 AudioEnginePlugin::~AudioEnginePlugin() {
+  if (proc_delegate_id_ >= 0) {
+    registrar_->UnregisterTopLevelWindowProcDelegate(proc_delegate_id_);
+  }
   cancel_capture_.store(true);
   tone_active_.store(false);
   level_active_.store(false);
@@ -853,25 +872,44 @@ void AudioEnginePlugin::CheckToneLoop() {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-// Note: EmitLevel and EmitDeviceEvent are called from background threads at
-// low frequency (≤10 Hz for level, rarely for device events). Direct EventSink
-// calls from non-UI threads are technically unsafe but function correctly in
-// practice for this use case. A production hardening pass would marshal via
-// PostMessage to the Flutter HWND to be fully correct.
+// EmitLevel and EmitDeviceEvent are called from background threads.
+// They push a callable onto pending_ and PostMessage kWmDrainQueue to the
+// Flutter HWND. DrainQueue() executes the callables on the UI thread via the
+// RegisterTopLevelWindowProcDelegate callback registered in the constructor.
+
+void AudioEnginePlugin::DrainQueue() {
+  std::deque<std::function<void()>> local;
+  {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    local.swap(pending_);
+  }
+  for (auto& fn : local) fn();
+}
 
 void AudioEnginePlugin::EmitLevel(double dbfs) {
-  if (level_sink_) {
-    level_sink_->Success(flutter::EncodableValue(dbfs));
+  {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    pending_.push_back([this, dbfs]() {
+      if (level_sink_)
+        level_sink_->Success(flutter::EncodableValue(dbfs));
+    });
   }
+  if (flutter_hwnd_) ::PostMessage(flutter_hwnd_, kWmDrainQueue, 0, 0);
 }
 
 void AudioEnginePlugin::EmitDeviceEvent(const std::string& event,
                                          const std::wstring& uid,
                                          const std::wstring& name) {
-  if (!device_sink_) return;
   flutter::EncodableMap m;
   m[flutter::EncodableValue("event")] = flutter::EncodableValue(event);
   m[flutter::EncodableValue("uid")]   = flutter::EncodableValue(WideToUtf8(uid));
   m[flutter::EncodableValue("name")]  = flutter::EncodableValue(WideToUtf8(name));
-  device_sink_->Success(flutter::EncodableValue(m));
+  {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    pending_.push_back([this, m = std::move(m)]() {
+      if (device_sink_)
+        device_sink_->Success(flutter::EncodableValue(m));
+    });
+  }
+  if (flutter_hwnd_) ::PostMessage(flutter_hwnd_, kWmDrainQueue, 0, 0);
 }
