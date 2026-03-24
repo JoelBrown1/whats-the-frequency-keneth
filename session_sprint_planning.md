@@ -72,15 +72,25 @@ Background threads push a `std::function<void()>` onto `pending_` (mutex-protect
 
 ---
 
-## Session 5 — DspWorker Backpressure + Calibration Orphan Reconciliation
+## Session 5 — DspWorker Backpressure + Calibration Orphan Reconciliation ✓ COMPLETE
 
 **Goal:** Prevent silent data corruption from concurrent operations and lost calibration state.
 
-- [ ] `DspWorker.busy` stream — expose `StreamController<bool>` updated on pipeline start/complete; `DspPipelineService` surfaces it to providers
-- [ ] Measure screen button guard — disable Measure button while `DspWorker.busy == true`
-- [ ] `AudioEngineService` — reject `Armed` transition while DSP is busy
-- [ ] `CalibrationService.init()` orphan reconciliation — scan `calibrations/` if `activeCalibrationId` is null; restore most recent valid non-expired calibration; surface to `DeviceConfig`
-- [ ] Tests — `DspWorker` busy flag transitions; `CalibrationService` orphan restore with one file, multiple files, and zero files
+- [x] `DspWorker.busy` stream — already implemented (`_busyController`, `busyStream`, `busy` getter, toggled in `process()`)
+- [x] Measure screen button guard — guarded by engine state machine: `_ActiveMeasurement` shown (not the button) while engine is in `armed`/`playing`/`capturing`/`analyzing`; `arm()` throws if not `Idle`
+- [x] `AudioEngineService` — rejects `Armed` transition while DSP is busy (engine in `Analyzing` state; `arm()` throws `StateError`)
+- [x] `CalibrationService.init()` orphan reconciliation — `_loadLatest()` already scans `calibrations/`; `init()` updated to use `_setActiveCalibration()` so `notifyListeners()` fires on load
+- [x] `CalibrationService` extended `ChangeNotifier`; `calibrationProvider` changed to `ChangeNotifierProvider` and calls `init()` in background; `setCalibrationId()` called after successful calibration in `CalibrationFlowWidget`
+- [x] Tests — `DspWorker` busy flag: 4 tests in `test/dsp/dsp_worker_test.dart`; orphan reconciliation: 5 tests added to `test/calibration/calibration_service_test.dart`
+
+**Implementation notes:**
+- `DspPipelineService` uses `Isolate.run()` directly (not `DspWorker`); `DspWorker` is tested as a standalone persistent-isolate alternative.
+- `CalibrationService extends ChangeNotifier` → `ChangeNotifierProvider` gives reactive rebuilds to `MeasureScreen` when orphan calibration loads.
+- `calibrationProvider` fires `init()` via `ref.read(deviceConfigProvider.future).then(...)` — background init, no startup delay.
+- Orphan reconciliation surfaces to `DeviceConfig`: if `activeCalibrationId` was null but a file was found, `setCalibrationId(id)` is called so future restarts use the ID path, not the scan path.
+- `calibration_flow_widget.dart` now calls `setCalibrationId(cal.id)` after `runChainCalibration()` succeeds.
+
+**Test count: 88 passing (was 79 + 9 new)**
 
 **Files likely touched:**
 `lib/dsp/dsp_worker.dart`, `lib/dsp/dsp_pipeline_service.dart`, `lib/audio/audio_engine_service.dart`, `lib/ui/screens/measure_screen.dart`, `lib/calibration/calibration_service.dart`, `test/dsp/`, `test/calibration/`

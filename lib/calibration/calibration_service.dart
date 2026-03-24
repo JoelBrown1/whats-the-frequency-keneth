@@ -8,6 +8,7 @@ import 'dart:math';
 
 import 'package:fftea/fftea.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:synchronized/synchronized.dart';
 import 'package:uuid/uuid.dart';
@@ -25,7 +26,7 @@ class CalibrationError implements Exception {
   String toString() => 'CalibrationError($code): $message';
 }
 
-class CalibrationService {
+class CalibrationService extends ChangeNotifier {
   static const Duration calibrationExpiryDuration = Duration(minutes: 30);
 
   final AudioEnginePlatformInterface _platform;
@@ -36,8 +37,20 @@ class CalibrationService {
   ChainCalibration? _activeCalibration;
   ChainCalibration? get activeCalibration => _activeCalibration;
 
+  void _setActiveCalibration(ChainCalibration? cal) {
+    if (cal == _activeCalibration) return;
+    _activeCalibration = cal;
+    notifyListeners();
+  }
+
   /// Reports current sweep pass (0-based) during runChainCalibration.
   final ValueNotifier<int> sweepProgress = ValueNotifier(0);
+
+  @override
+  void dispose() {
+    sweepProgress.dispose();
+    super.dispose();
+  }
 
   // ─── Persistence ───────────────────────────────────────────────────────────
 
@@ -132,10 +145,12 @@ class CalibrationService {
 
   /// Initialise: restore the most recent calibration from disk.
   Future<void> init({String? activeCalibrationId}) async {
+    ChainCalibration? loaded;
     if (activeCalibrationId != null) {
-      _activeCalibration = await _loadById(activeCalibrationId);
+      loaded = await _loadById(activeCalibrationId);
     }
-    _activeCalibration ??= await _loadLatest();
+    loaded ??= await _loadLatest();
+    _setActiveCalibration(loaded);
   }
 
   /// Returns true if a calibration exists and has not expired.
@@ -203,7 +218,7 @@ class CalibrationService {
     );
 
     await _save(cal);
-    _activeCalibration = cal;
+    _setActiveCalibration(cal);
     sweepProgress.value = config.sweepCount;
     appLog.i('[Calibration] Complete — id: ${cal.id}');
     return cal;

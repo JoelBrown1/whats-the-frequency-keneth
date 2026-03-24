@@ -70,7 +70,7 @@ Widget _wrapScreen({
   final mock = _buildMockPlatform();
   final overrides = <Override>[
     audioEnginePlatformProvider.overrideWithValue(mock),
-    calibrationProvider.overrideWithValue(cal),
+    calibrationProvider.overrideWith((_) => cal),
     if (engineState != null)
       audioEngineProvider.overrideWith(
         () => _FixedStateEngine(engineState),
@@ -182,7 +182,7 @@ void main() {
     await tester.pumpWidget(ProviderScope(
       overrides: [
         audioEnginePlatformProvider.overrideWithValue(mock),
-        calibrationProvider.overrideWithValue(cal),
+        calibrationProvider.overrideWith((_) => cal),
       ],
       child: Builder(builder: (context) {
         container = ProviderScope.containerOf(context);

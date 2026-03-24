@@ -10,6 +10,7 @@ import 'package:intl/intl.dart';
 import 'package:whats_the_frequency/calibration/calibration_service.dart';
 import 'package:whats_the_frequency/l10n/l10n.dart';
 import 'package:whats_the_frequency/providers/calibration_provider.dart';
+import 'package:whats_the_frequency/providers/device_config_provider.dart';
 import 'package:whats_the_frequency/providers/sweep_config_provider.dart';
 
 enum _CalibrationState { idle, running, success, error }
@@ -47,6 +48,10 @@ class _CalibrationFlowWidgetState
     service.sweepProgress.addListener(_onSweepProgress);
     try {
       final cal = await service.runChainCalibration(config);
+      // Persist calibration ID so it survives app restart.
+      await ref
+          .read(deviceConfigProvider.notifier)
+          .setCalibrationId(cal.id);
       setState(() {
         _state = _CalibrationState.success;
         _successTimestamp =
