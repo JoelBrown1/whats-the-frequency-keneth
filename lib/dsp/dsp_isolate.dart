@@ -290,6 +290,20 @@ void _applyHumSuppression(
   }
 }
 
+/// Public entry point for the spectral hum-suppression stage, exposed so tests
+/// can verify interpolation behaviour without running the full pipeline.
+/// Replaces bins near each harmonic of [mainsHz] with linear interpolation
+/// between the neighbouring bins just outside the [halfWindow]-wide window.
+void applyHumSuppression(
+  Float64List db,
+  List<double> freqAxis,
+  double mainsHz, {
+  int halfWindow = 10,
+  int maxHarmonic = 39,
+}) =>
+    _applyHumSuppression(db, freqAxis, mainsHz,
+        halfWindow: halfWindow, maxHarmonic: maxHarmonic);
+
 // ─── Stage 8: 1/3-octave smoothing ──────────────────────────────────────────
 
 Float64List _thirdOctaveSmooth(Float64List rawDb, List<double> freqAxis) {
