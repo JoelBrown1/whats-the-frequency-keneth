@@ -7,6 +7,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:whats_the_frequency/l10n/l10n.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
@@ -111,7 +112,6 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
   }
 
   Future<void> _save(BuildContext context, FrequencyResponse response) async {
-    final navigator = Navigator.of(context);
     final result = await showDialog<_SaveDialogResult>(
       context: context,
       builder: (ctx) => const _SaveDialog(),
@@ -169,7 +169,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
     }
 
     if (!mounted) return;
-    navigator.pushNamedAndRemoveUntil('/home', (_) => false);
+    context.go('/home');
   }
 
   Future<void> _export(

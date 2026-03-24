@@ -5,6 +5,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:whats_the_frequency/l10n/l10n.dart';
 import 'package:whats_the_frequency/providers/audio_engine_platform_provider.dart';
 import 'package:whats_the_frequency/providers/available_devices_provider.dart';
@@ -51,7 +52,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     final notifier = ref.read(deviceConfigProvider.notifier);
     if (_currentStep == OnboardingStep.calibration) {
       await notifier.completeOnboarding();
-      if (mounted) Navigator.of(context).pushReplacementNamed('/home');
+      if (mounted) context.go('/home');
       return;
     }
     await notifier.setOnboardingStep(_currentStep.index + 1);

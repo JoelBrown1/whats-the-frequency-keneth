@@ -12,6 +12,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:synchronized/synchronized.dart';
 import 'package:uuid/uuid.dart';
 import 'package:whats_the_frequency/audio/audio_engine_platform_interface.dart';
+import 'package:whats_the_frequency/logging/app_logger.dart';
 import 'package:whats_the_frequency/audio/models/sweep_config.dart';
 import 'package:whats_the_frequency/calibration/models/chain_calibration.dart';
 import 'package:whats_the_frequency/dsp/log_sine_sweep.dart';
@@ -159,12 +160,14 @@ class CalibrationService {
         .timeout(const Duration(seconds: 2), onTimeout: () => -60.0);
     await _platform.stopLevelMeter();
     if (level > -20.0) {
+      appLog.w('[Calibration] Pre-check failed: level ${level.toStringAsFixed(1)} dBFS > −20 dBFS');
       throw CalibrationError(
           'PICKUP_STILL_CONNECTED',
           'Signal detected (${level.toStringAsFixed(1)} dBFS). '
               'Replace pickup with 10 kΩ resistor before calibrating.');
     }
 
+    appLog.d('[Calibration] Pre-check passed (${level.toStringAsFixed(1)} dBFS). Starting sweeps…');
     // Generate sweep.
     final sweep = LogSineSweep(
       f1: config.f1Hz,
@@ -202,6 +205,7 @@ class CalibrationService {
     await _save(cal);
     _activeCalibration = cal;
     sweepProgress.value = config.sweepCount;
+    appLog.i('[Calibration] Complete — id: ${cal.id}');
     return cal;
   }
 

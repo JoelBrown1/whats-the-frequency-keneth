@@ -9,12 +9,13 @@ import 'dart:math';
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:whats_the_frequency/constants.dart';
 import 'package:whats_the_frequency/dsp/models/frequency_response.dart';
 import 'package:whats_the_frequency/dsp/models/resonance_search_band.dart';
 import 'package:whats_the_frequency/ui/widgets/search_band_overlay.dart';
 
-const double _minFreq = 100.0;
-const double _maxFreq = 20000.0;
+const double _minFreq = kChartMinFreqHz;
+const double _maxFreq = kChartMaxFreqHz;
 
 double _log10(double x) => log(x) / ln10;
 

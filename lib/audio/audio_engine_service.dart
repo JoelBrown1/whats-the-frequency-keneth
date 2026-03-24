@@ -16,6 +16,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:flutter/services.dart';
 
+import '../logging/app_logger.dart';
 import '../providers/audio_engine_platform_provider.dart';
 import 'audio_engine_platform_interface.dart';
 import 'models/capture_result.dart';
@@ -97,6 +98,7 @@ class AudioEngineService extends Notifier<AudioEngineServiceState> {
   }
 
   void _transitionToDeviceError(String code, String message) {
+    appLog.e('[AudioEngine] Device error: $code — $message');
     state = AudioEngineServiceState(
       state: AudioEngineState.deviceError,
       error: AudioEngineError(
@@ -108,6 +110,7 @@ class AudioEngineService extends Notifier<AudioEngineServiceState> {
   }
 
   void _transitionToRecoverableError(String code, String message) {
+    appLog.w('[AudioEngine] Recoverable error: $code — $message');
     state = AudioEngineServiceState(
       state: AudioEngineState.recoverableError,
       error: AudioEngineError(
@@ -128,6 +131,7 @@ class AudioEngineService extends Notifier<AudioEngineServiceState> {
     if (state.state != AudioEngineState.idle) {
       throw StateError('Can only arm from Idle state');
     }
+    appLog.d('[AudioEngine] → armed');
     state = AudioEngineServiceState(state: AudioEngineState.armed);
   }
 
@@ -173,6 +177,7 @@ class AudioEngineService extends Notifier<AudioEngineServiceState> {
 
   /// Mark analysis complete. Transitions Analyzing → Complete.
   void completeAnalysis(CaptureResult capture) {
+    appLog.i('[AudioEngine] → complete (capturedAt: ${capture.capturedAt})');
     state = AudioEngineServiceState(
       state: AudioEngineState.complete,
       lastCapture: capture,

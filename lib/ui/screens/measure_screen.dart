@@ -9,6 +9,7 @@ import 'package:whats_the_frequency/data/capture_checkpoint_service.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:whats_the_frequency/audio/audio_engine_service.dart';
 import 'package:whats_the_frequency/audio/models/capture_result.dart';
 import 'package:whats_the_frequency/dsp/dsp_isolate.dart';
@@ -40,8 +41,7 @@ class MeasureScreen extends ConsumerWidget {
         children: [
           if (isExpired)
             CalibrationExpiryBanner(
-              onRecalibrate: () =>
-                  Navigator.of(context).pushNamed('/calibration'),
+              onRecalibrate: () => context.push('/calibration'),
             ),
           Expanded(
             child: hasValidCalibration
@@ -69,8 +69,7 @@ class _NoCalibrationBlock extends StatelessWidget {
               style: const TextStyle(fontSize: 16)),
           const SizedBox(height: 24),
           ElevatedButton(
-            onPressed: () =>
-                Navigator.of(context).pushNamed('/calibration'),
+            onPressed: () => context.push('/calibration'),
             child: Text(l10n.recalibrate),
           ),
         ],
@@ -207,7 +206,8 @@ class _MeasureContentState extends ConsumerState<_MeasureContent>
     FrequencyResponse response;
     try {
       response = await dsp.processMultiple(
-          captures, calibration, config, searchBand);
+          captures, calibration, config, searchBand,
+          mainsHz: deviceConfig?.measuredMainsHz);
     } catch (_) {
       engine.processingFailed();
       return;
@@ -218,7 +218,7 @@ class _MeasureContentState extends ConsumerState<_MeasureContent>
     await _checkpoint.clear();
 
     if (mounted) {
-      Navigator.of(context).pushNamed('/results', arguments: response);
+      context.push('/results', extra: response);
     }
   }
 

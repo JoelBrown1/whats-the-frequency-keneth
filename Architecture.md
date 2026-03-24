@@ -83,11 +83,12 @@ Set this in Xcode (macOS and iOS targets) and in `pubspec.yaml` from Phase 0. Al
 | Role | Package | Notes |
 |---|---|---|
 | Audio I/O | Custom platform channel plugin | See critical decision below |
-| FFT | `fftea` | Pure Dart; run in persistent worker Isolate |
+| FFT | `fftea` | Pure Dart; run in `Isolate.run()` per measurement |
 | Charting | `fl_chart` | Log-axis via data transform |
 | State management | `flutter_riverpod` | Scoped providers per screen |
-| Persistence | `path_provider` + `dart:io` | JSON per measurement |
-| Export | `csv` | CSV compatible with REW / MATLAB / Excel |
+| Persistence | `path_provider` + `dart:io` | JSON per measurement; raw Float32LE for sweep checkpoints |
+| Navigation | `go_router` | Type-safe named routes; `routerProvider` exposes `GoRouter` to `MaterialApp.router` |
+| Logging | `logger` | `appLog` global instance in `lib/logging/app_logger.dart`; `Level.warning` in release builds |
 | App version | `package_info_plus` | Reads `appVersion` from `pubspec.yaml` at runtime for `Measurement` JSON |
 | File write mutex | `synchronized` | Per-repository `Lock` prevents concurrent write races in `MeasurementRepository` and `PickupRepository` |
 
@@ -130,6 +131,32 @@ Streams device change notifications as `Map<String, dynamic>`:
 ```
 
 `AudioEngineService` subscribes to this stream at startup and transitions to `DeviceError` if the active device UID appears in a `deviceRemoved` event.
+
+---
+
+## Navigation
+
+Navigation is handled by `go_router` v14 via a `routerProvider` (`Provider<GoRouter>`) defined in `lib/routing/app_router.dart`. `MaterialApp` is replaced by `MaterialApp.router(routerConfig: ref.watch(routerProvider))`.
+
+### Route table
+
+| Path | Screen | Notes |
+|---|---|---|
+| `/` | `SplashScreen` | Checks `onboardingComplete`; redirects to `/home` or `/onboarding` |
+| `/onboarding` | `OnboardingScreen` | Linear first-launch flow; exits to `/home` via `context.go` |
+| `/home` | `HomeScreen` | Tab shell for Setup / Measure tabs |
+| `/calibration` | `CalibrationScreen` | Pushed from Measure screen |
+| `/results` | `ResultsScreen` | Pushed from Measure screen; receives `FrequencyResponse` via `state.extra` |
+| `/history` | `HistoryScreen` | Pushed from home |
+
+### Navigation calls
+
+All navigation uses `go_router` — `Navigator` APIs are not used:
+
+- **`context.go('/path')`** — replaces the entire navigation stack (used for splash→home, onboarding→home, results→home)
+- **`context.push('/path', extra: value)`** — pushes on the stack, preserving back navigation (used for home→calibration, home→results)
+
+`state.extra` carries typed arguments (e.g. `FrequencyResponse?` to `ResultsScreen`). Cast at the call site; the router has no runtime type check.
 
 ---
 
@@ -361,8 +388,9 @@ Pipeline steps:
 4. **Chain correction:** divide by stored `H_chain(f)` → `H_pickup(f)`
 5. **Regularization:** apply Tikhonov regularization at low-energy bins to prevent instability at band edges: `H[i] = Y[i] * conj(X[i]) / (|X[i]|² + ε²)`
 6. **Magnitude response:** `|H_pickup(f)|` in dB
-7. **Frequency taper:** cosine fade over 20–80 Hz and 10–20 kHz where pickup response and sweep energy are both weakest
-8. **Smoothing:** Savitzky-Golay or moving average in log-frequency space
+7. **Frequency taper:** linear 6 dB/oct roll-off applied above 15 kHz where pickup response and sweep energy are both weakest
+7b. **Spectral hum suppression:** if `DspPipelineInput.mainsHz` is non-null, linearly interpolate across ±10 bins around each of the first 39 mains harmonics (`h × mainsHz`, stopping when `h × mainsHz > freqAxis.last`). Removes residual hum artefacts before peak detection without affecting broadband response shape.
+8. **Smoothing:** 1/3-octave smoothing in log-frequency space
 9. **Peak detection:** find all peaks above -20 dB relative to max within the user-configured `ResonanceSearchBand`
 10. **Q-factor:** for each peak, find -3 dB points `f_low`, `f_high` → `Q = f₀ / (f_high - f_low)`
 
@@ -597,10 +625,37 @@ On receipt, check whether the active device UID is still present. If not, cancel
 
 In WASAPI shared mode, the Windows Audio Session API routes audio through the OS audio engine, which may resample to the system mix format. If the mix rate differs from 48 kHz (e.g. 44.1 kHz or 96 kHz), every frequency in the measurement is shifted proportionally — a systematic error with no obvious warning.
 
-The Windows plugin must request WASAPI exclusive mode at 48 kHz / 24-bit:
-- In exclusive mode, the app owns the device directly and the OS does not resample
-- If the device is already held in exclusive mode by another app, `AUDCLNT_E_DEVICE_IN_USE` is returned — surface this as a `DeviceError` with the message: *"Close Focusrite Control (or any other app using the Scarlett 2i2) and try again."* Focusrite Control is the most likely culprit and should be named explicitly.
-- Shared mode is not acceptable for this application and must not be used as a fallback
+**Implementation:** `windows/runner/audio_engine_plugin.cpp` implements `AudioEnginePlugin : public flutter::Plugin, IMMNotificationClient`. It is registered in `flutter_window.cpp` (not `generated_plugin_registrant.cc`, which is auto-generated and must not be edited):
+
+```cpp
+AudioEnginePlugin::RegisterWithRegistrar(
+    static_cast<flutter::PluginRegistrarWindows*>(
+        flutter_controller_->engine()->GetRegistrarForPlugin("AudioEnginePlugin")));
+```
+
+**Channel implementation:**
+
+| Handler | Behaviour |
+|---|---|
+| `getAvailableDevices` | `IMMDeviceEnumerator::EnumAudioEndpoints(eRender)` — returns list of render devices with UID, name, native sample rate |
+| `setDevice` | Validates UID via `GetDevice`; stores in `selected_device_id_` |
+| `getActiveSampleRate` | Opens `IAudioClient`, reads `GetMixFormat` |
+| `runCapture` | Launches `CaptureLoop` thread; method call blocks on `capture_done_event_` (Win32 event) |
+| `cancelCapture` | Sets `cancel_capture_` atomic flag; `CaptureLoop` exits on next poll |
+| `startLevelMeter` / `stopLevelMeter` | Starts/stops `LevelMeterLoop` thread |
+| `startLevelCheckTone` / `stopLevelCheckTone` | Starts/stops `CheckToneLoop` thread |
+
+**`CaptureLoop`:** Opens render `IAudioClient` and capture `IAudioClient` in WASAPI exclusive mode at 48 kHz / 32-bit float (falls back to shared mode if exclusive fails). Starts both clients, feeds sweep samples to render via `IAudioRenderClient`, drains capture into accumulator via `IAudioCaptureClient`. Checks for dropout (`AUDCLNT_E_BUFFER_ERROR`) and output clipping (samples >0.891f, i.e. −1 dBFS). Writes result to `captured_samples_`, sets success flag, signals `capture_done_event_`.
+
+**`LevelMeterLoop`:** Shared-mode capture client; accumulates peak dBFS in 100 ms windows; emits via `level_sink_` at ~10 Hz.
+
+**`CheckToneLoop`:** Exclusive-mode render client; plays a 1 kHz sine at −6 dBFS in a loop until `tone_active_` is set to false.
+
+**Device change notifications:** `AudioEnginePlugin` implements `IMMNotificationClient`. `OnDeviceAdded` / `OnDeviceRemoved` emit to `device_sink_` via `EmitDeviceEvent`. `AudioEngineService` on the Dart side transitions to `DeviceError` if the active device UID appears in a `deviceRemoved` event.
+
+**Link libraries:** `ole32.lib`, `oleaut32.lib`, `mmdevapi.lib`, `propsys.lib` (declared in `windows/runner/CMakeLists.txt`).
+
+**Production note:** `EmitLevel` and `EmitDeviceEvent` are called directly from background threads. For production hardening, sink calls should be marshalled to the Flutter engine thread via `PostMessage` / `SendMessage` to avoid potential race conditions on sink teardown.
 
 #### Audio I/O Buffer Size
 
@@ -682,7 +737,7 @@ Three values are named in the pipeline but never given defaults. All three requi
 | Parameter | Role | Starting value | Risk if wrong |
 |---|---|---|---|
 | Tikhonov ε | Regularization at low-energy bins during chain division | `1e-3` (relative to max `\|X\|`) | Too small → division instability at band edges; too large → real signal suppressed |
-| Savitzky-Golay window | Smoothing in log-frequency space | 11 bins (≈ 1/3 octave at mid-frequencies) | Too wide → peak shift and Q underestimate; too narrow → noise not removed |
+| 1/3-octave smoothing window | Smoothing in log-frequency space (step 8) | ~11 bins at mid-frequencies | Too wide → peak shift and Q underestimate; too narrow → noise not removed |
 | Peak detection threshold | Minimum peak height relative to max | -20 dB | Too tight → misses secondary resonances; too loose → noise peaks reported as resonances |
 
 Validate each against the synthetic 4 kHz Q=3 pickup model in Phase 1 unit tests before using real hardware.

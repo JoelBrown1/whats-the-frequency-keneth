@@ -81,6 +81,12 @@ FrequencyResponse runPipelineMultiple(List<DspPipelineInput> inputs) {
   // Stage 7: Frequency taper (>15 kHz, 6 dB/oct).
   _applyTaper(rawDb, freqAxis);
 
+  // Stage 7b: Spectral hum suppression (optional).
+  final mainsHz = first.mainsHz;
+  if (mainsHz != null && mainsHz > 0) {
+    _applyHumSuppression(rawDb, freqAxis, mainsHz);
+  }
+
   // Stage 8: 1/3-octave smoothing.
   final smoothedDb = _thirdOctaveSmooth(rawDb, freqAxis);
 
@@ -239,6 +245,47 @@ void _applyTaper(Float64List db, List<double> freqAxis) {
     if (freqAxis[i] > cutoffHz) {
       final octavesAbove = log(freqAxis[i] / cutoffHz) / ln2;
       db[i] -= octavesAbove * 6.0;
+    }
+  }
+}
+
+// ─── Stage 7b: Spectral hum suppression ─────────────────────────────────────
+
+/// Interpolates linearly across ±[halfWindow] frequency bins around each of
+/// the first 39 mains harmonics.  Eliminates mains hum peaks that survived
+/// the golden-ratio averaging (e.g. due to fluctuating mains frequency).
+void _applyHumSuppression(
+  Float64List db,
+  List<double> freqAxis,
+  double mainsHz, {
+  int halfWindow = 10,
+  int maxHarmonic = 39,
+}) {
+  for (int h = 1; h <= maxHarmonic; h++) {
+    final harmonicHz = h * mainsHz;
+    if (harmonicHz > freqAxis.last) break;
+
+    // Find nearest bin to this harmonic.
+    int center = 0;
+    double nearestDist = double.infinity;
+    for (int i = 0; i < freqAxis.length; i++) {
+      final d = (freqAxis[i] - harmonicHz).abs();
+      if (d < nearestDist) {
+        nearestDist = d;
+        center = i;
+      }
+    }
+
+    final lo = (center - halfWindow).clamp(0, db.length - 1);
+    final hi = (center + halfWindow).clamp(0, db.length - 1);
+    if (lo >= hi) continue;
+
+    // Linear interpolation between the values just outside the window.
+    final loVal = db[lo];
+    final hiVal = db[hi];
+    for (int i = lo + 1; i < hi; i++) {
+      final frac = (i - lo) / (hi - lo);
+      db[i] = loVal * (1.0 - frac) + hiVal * frac;
     }
   }
 }

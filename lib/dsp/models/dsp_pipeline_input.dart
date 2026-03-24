@@ -22,6 +22,10 @@ class DspPipelineInput {
   final double searchBandLowHz;
   final double searchBandHighHz;
 
+  /// Mains frequency for spectral hum suppression (Hz).
+  /// null disables hum suppression.
+  final double? mainsHz;
+
   const DspPipelineInput({
     required this.capturedSamples,
     required this.sampleRate,
@@ -34,5 +38,6 @@ class DspPipelineInput {
     required this.hChainImag,
     required this.searchBandLowHz,
     required this.searchBandHighHz,
+    this.mainsHz,
   });
 }

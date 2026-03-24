@@ -10,6 +10,7 @@
 import 'dart:isolate';
 
 import 'package:whats_the_frequency/audio/models/capture_result.dart';
+import 'package:whats_the_frequency/logging/app_logger.dart';
 import 'package:whats_the_frequency/audio/models/sweep_config.dart';
 import 'package:whats_the_frequency/calibration/models/chain_calibration.dart';
 import 'package:whats_the_frequency/dsp/dsp_isolate.dart';
@@ -30,13 +31,19 @@ class DspPipelineService {
 
   /// Process multiple captures, averaging complex spectra before converting
   /// to dB. Better noise reduction than averaging the final dB values.
+  ///
+  /// [mainsHz] enables spectral hum suppression at mains harmonics.
+  /// Pass null (default) to skip suppression.
   Future<FrequencyResponse> processMultiple(
     List<CaptureResult> captures,
     ChainCalibration calibration,
     SweepConfig sweepConfig,
-    ResonanceSearchBand searchBand,
-  ) async {
+    ResonanceSearchBand searchBand, {
+    double? mainsHz,
+  }) async {
     assert(captures.isNotEmpty, 'At least one capture required');
+    appLog.d('[DSP] Starting pipeline: ${captures.length} capture(s), '
+        'f1=${sweepConfig.f1Hz} Hz, f2=${sweepConfig.f2Hz} Hz');
 
     // Build per-capture inputs. All are the same config; only samples differ.
     final inputs = captures
@@ -52,9 +59,13 @@ class DspPipelineService {
               hChainImag: calibration.hChainImag,
               searchBandLowHz: searchBand.lowHz,
               searchBandHighHz: searchBand.highHz,
+              mainsHz: mainsHz,
             ))
         .toList();
 
-    return Isolate.run(() => runPipelineMultiple(inputs));
+    final result = await Isolate.run(() => runPipelineMultiple(inputs));
+    appLog.i('[DSP] Complete — peak: ${result.primaryPeak.frequencyHz.toStringAsFixed(0)} Hz, '
+        'Q: ${result.primaryPeak.qFactor.toStringAsFixed(2)}');
+    return result;
   }
 }
