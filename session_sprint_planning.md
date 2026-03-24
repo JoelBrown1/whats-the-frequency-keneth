@@ -57,18 +57,25 @@ Background threads push a `std::function<void()>` onto `pending_` (mutex-protect
 
 ---
 
-## Session 4 — History Screen
+## Session 4 — History Screen ✓ COMPLETE
 
 **Goal:** Make the History screen production-ready.
 
-- [ ] Two-stage loading — implement `loadSummaries()` (metadata only: id, timestamp, pickupLabel, pickupId, resonanceFrequencyHz, qFactor) and `loadFull(id)` on `MeasurementRepository`
-- [ ] `MeasurementSummary` model — new lightweight model; add `fromJson` constructor reading only summary fields
-- [ ] History screen — bind to `loadSummaries()`; call `loadFull()` only when a measurement is opened for display or overlay
-- [ ] By-pickup grouping — add grouping view alongside flat date-sorted list
-- [ ] History screen lazy load test — assert `loadFull` is not called during list render
+- [x] Two-stage loading — `loadSummaries()` and `loadFull(id)` implemented on `MeasurementRepository`
+- [x] `MeasurementSummary` model — `lib/data/models/measurement_summary.dart` with `fromJson` reading only summary fields
+- [x] History screen — binds to `loadSummaries()`; calls `loadFull()` only when a measurement is tapped in `selectionMode`
+- [x] By-pickup grouping — `_groupByPickup` toggle switch; groups under `ExpansionTile` headers by `pickupId`
+- [x] History screen lazy load tests — 5 widget tests in `test/ui/history_screen_test.dart`
+
+**Implementation notes:**
+- All items were pre-built before this session. Work was writing the 5 widget tests.
+- Core lazy-load contract: `when(() => repo.loadFull(any())).thenThrow(StateError(...))` — if called during list render the test fails immediately; `verifyNever(() => repo.loadFull(any()))` asserts the contract.
+- `selectionMode: true` pushes `HistoryScreen` onto the navigator so `pop()` can return a `FrequencyResponse`; test asserts `popped.primaryPeak.frequencyHz == 4000.0`.
+
+**Test count: 79 passing (was 74 + 5 new)**
 
 **Files likely touched:**
-`lib/data/measurement_repository.dart`, `lib/models/measurement_summary.dart` (new), `lib/ui/screens/history_screen.dart`, `test/data/measurement_repository_test.dart`
+`lib/data/measurement_repository.dart`, `lib/data/models/measurement_summary.dart` (new), `lib/ui/screens/history_screen.dart`, `test/ui/history_screen_test.dart` (new)
 
 ---
 
@@ -97,20 +104,28 @@ Background threads push a `std::function<void()>` onto `pending_` (mutex-protect
 
 ---
 
-## Session 6 — Onboarding Completion + Mains Frequency Wiring
+## Session 6 — Onboarding Completion + Mains Frequency Wiring ✓ COMPLETE
 
 **Goal:** Complete the onboarding flow as specified in Architecture.md.
 
 Full flow: Welcome → Hardware Checklist → Device Selection → **Mains Frequency** → Level Check → Chain Calibration → First Measurement
 
-- [ ] Mains frequency measurement step — wire into `OnboardingScreen`; trigger `CalibrationService.measureMainsFrequency()`; store result in `DeviceConfig.measuredMainsHz`
-- [ ] Resume mid-flow — confirm `lastCompletedOnboardingStep` persisted in `SharedPreferences`; `OnboardingScreen` resumes from correct step on relaunch
-- [ ] Calibration orphan reconciliation (if not done in Session 5) — `CalibrationService.init()` restore
-- [ ] Sweep clipping check (Step 0) — confirm wired in `MeasureScreen` / `AudioEngineService` before every measurement run
-- [ ] `DeviceConfig` default mains Hz — confirm that `50.0 Hz` default is clearly marked as a placeholder; UI warns if mains step has not been run
+- [x] Mains frequency measurement step — wired into `OnboardingScreen._MainsFrequencyStep`; `CalibrationService.measureMainsFrequency()` triggered; result stored in `DeviceConfig.measuredMainsHz`
+- [x] Resume mid-flow — `OnboardingScreen` now uses `ref.listen` on `deviceConfigProvider` in `build()` instead of `addPostFrameCallback`; correctly handles async provider load race; `lastCompletedOnboardingStep` restored when provider resolves
+- [x] `DeviceConfig.mainsMeasured: bool` — new field, defaults `false`; set to `true` when `setMainsHz()` called; JSON backwards-compatible (missing field → `false`)
+- [x] Warning banner in `MeasureScreen` — amber `_MainsNotMeasuredBanner` shown when `!deviceConfig.mainsMeasured`; taps to `/onboarding`; `mainsNotMeasuredWarning` l10n string added
+- [x] Sweep clipping check — `OUTPUT_CLIPPING` already surfaces from Swift plugin; `_localiseError` in `MeasureScreen` maps it to `l10n.errorOutputClipping`
+- [x] Tests — 6 onboarding widget tests in `test/ui/onboarding_screen_test.dart`; 2 banner tests added to `test/ui/measure_screen_test.dart`; `setMainsHz() sets mainsMeasured to true` test in `test/providers/device_config_provider_test.dart`; 3 `DeviceConfig` JSON tests in `test/data/device_config_test.dart`
 
-**Files likely touched:**
-`lib/ui/screens/onboarding_screen.dart`, `lib/calibration/calibration_service.dart`, `lib/providers/device_config_provider.dart`, `lib/ui/screens/measure_screen.dart`, `lib/audio/audio_engine_service.dart`
+**Implementation notes:**
+- `_restoreStep()` removed; replaced with `ref.listen<AsyncValue<DeviceConfig>>` in `build()` with `_stepRestored` flag — fixes race where `addPostFrameCallback` fired before `AsyncNotifierProvider` resolved from SharedPreferences.
+- `setCalibrationId(null)` kept as explicit `DeviceConfig(...)` constructor; `copyWith(activeCalibrationId: null)` uses `??` which cannot clear a nullable field.
+- `levelCheckToneProvider` uses `platform.levelMeterStream`; onboarding tests must stub `startLevelCheckTone`, `stopLevelCheckTone`, and return `Stream.value(-40.0)` for `levelMeterStream` (empty stream leaves `StreamProvider` in loading state → spinner → `pumpAndSettle` timeout).
+
+**Test count: 98 passing (was 88 + 10 new)**
+
+**Files touched:**
+`lib/audio/models/device_config.dart`, `lib/providers/device_config_provider.dart`, `lib/ui/screens/onboarding_screen.dart`, `lib/ui/screens/measure_screen.dart`, `lib/l10n/app_en.arb`, `lib/l10n/app_localizations.dart`, `lib/l10n/app_localizations_en.dart`, `test/ui/onboarding_screen_test.dart` (new), `test/ui/measure_screen_test.dart`, `test/providers/device_config_provider_test.dart`, `test/data/device_config_test.dart`
 
 ---
 

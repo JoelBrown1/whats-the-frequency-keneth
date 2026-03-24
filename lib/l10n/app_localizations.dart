@@ -477,6 +477,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Try again'**
   String get calibrationTryAgain;
+
+  /// Warning banner when mains frequency has never been measured
+  ///
+  /// In en, this message translates to:
+  /// **'Mains frequency not yet measured — hum suppression is using the 50 Hz default. Tap to measure.'**
+  String get mainsNotMeasuredWarning;
 }
 
 class _AppLocalizationsDelegate

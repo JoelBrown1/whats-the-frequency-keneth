@@ -3,6 +3,7 @@
 // - JSON round-trip preserves all fields exactly.
 // - Missing optional fields deserialize to documented defaults.
 // - lastCompletedOnboardingStep defaults to 0 when absent.
+// - mainsMeasured defaults to false when absent.
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:whats_the_frequency/audio/models/device_config.dart';
@@ -16,6 +17,7 @@ void main() {
         deviceName: 'Scarlett 2i2 USB',
         sampleRate: 48000,
         measuredMainsHz: 49.97,
+        mainsMeasured: true,
         resonanceSearchBand: ResonanceSearchBand(lowHz: 500.0, highHz: 12000.0),
         onboardingComplete: true,
         activeCalibrationId: 'cal-uuid-456',
@@ -29,6 +31,7 @@ void main() {
       expect(restored.deviceName, equals(config.deviceName));
       expect(restored.sampleRate, equals(config.sampleRate));
       expect(restored.measuredMainsHz, equals(config.measuredMainsHz));
+      expect(restored.mainsMeasured, isTrue);
       expect(restored.resonanceSearchBand.lowHz,
           equals(config.resonanceSearchBand.lowHz));
       expect(restored.resonanceSearchBand.highHz,
@@ -51,11 +54,26 @@ void main() {
 
       // Pass criteria: defaults match spec.
       expect(config.measuredMainsHz, equals(50.0));
+      expect(config.mainsMeasured, isFalse);
       expect(config.resonanceSearchBand.lowHz, equals(1000.0));
       expect(config.resonanceSearchBand.highHz, equals(15000.0));
       expect(config.onboardingComplete, isFalse);
       expect(config.activeCalibrationId, isNull);
       expect(config.lastCompletedOnboardingStep, equals(0));
+    });
+
+    test('mainsMeasured defaults to false when absent from JSON', () {
+      final json = <String, dynamic>{
+        'deviceUid': 'uid',
+        'deviceName': 'Device',
+        'sampleRate': 48000,
+        'measuredMainsHz': 60.0,
+        // mainsMeasured intentionally absent — simulates old stored JSON
+      };
+      final config = DeviceConfig.fromJson(json);
+      expect(config.mainsMeasured, isFalse,
+          reason: 'Old configs without mainsMeasured must default to false '
+              'so the warning banner appears after upgrade');
     });
 
     test('lastCompletedOnboardingStep defaults to 0 when absent', () {

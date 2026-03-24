@@ -326,5 +326,10 @@
   "calibrationTryAgain": "Try again",
   "@calibrationTryAgain": {
     "description": "Button to dismiss a calibration error and retry"
+  },
+
+  "mainsNotMeasuredWarning": "Mains frequency not yet measured — hum suppression is using the 50 Hz default. Tap to measure.",
+  "@mainsNotMeasuredWarning": {
+    "description": "Warning banner when mains frequency has never been measured"
   }
 }

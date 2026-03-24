@@ -47,16 +47,18 @@ class DeviceConfigNotifier extends AsyncNotifier<DeviceConfig> {
 
   Future<void> setMainsHz(double hz) async {
     final current = state.valueOrNull ?? _kDefaultConfig;
-    await _save(current.copyWith(measuredMainsHz: hz));
+    await _save(current.copyWith(measuredMainsHz: hz, mainsMeasured: true));
   }
 
   Future<void> setCalibrationId(String? id) async {
     final current = state.valueOrNull ?? _kDefaultConfig;
+    // copyWith cannot clear a nullable field to null; use explicit constructor.
     await _save(DeviceConfig(
       deviceUid: current.deviceUid,
       deviceName: current.deviceName,
       sampleRate: current.sampleRate,
       measuredMainsHz: current.measuredMainsHz,
+      mainsMeasured: current.mainsMeasured,
       resonanceSearchBand: current.resonanceSearchBand,
       onboardingComplete: current.onboardingComplete,
       activeCalibrationId: id,

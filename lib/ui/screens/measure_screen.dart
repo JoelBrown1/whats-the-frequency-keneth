@@ -34,6 +34,8 @@ class MeasureScreen extends ConsumerWidget {
     final hasValidCalibration = calibrationService.isCalibrationValid();
     final isExpired = calibrationService.activeCalibration != null &&
         !calibrationService.isCalibrationValid();
+    final deviceConfig = ref.watch(deviceConfigProvider).valueOrNull;
+    final mainsNotMeasured = deviceConfig != null && !deviceConfig.mainsMeasured;
 
     return Scaffold(
       appBar: AppBar(title: Text(l10n.measureTitle)),
@@ -43,12 +45,47 @@ class MeasureScreen extends ConsumerWidget {
             CalibrationExpiryBanner(
               onRecalibrate: () => context.push('/calibration'),
             ),
+          if (mainsNotMeasured)
+            _MainsNotMeasuredBanner(
+              onTap: () => context.push('/onboarding'),
+              message: l10n.mainsNotMeasuredWarning,
+            ),
           Expanded(
             child: hasValidCalibration
                 ? const _MeasureContent()
                 : _NoCalibrationBlock(),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _MainsNotMeasuredBanner extends StatelessWidget {
+  final VoidCallback onTap;
+  final String message;
+  const _MainsNotMeasuredBanner({required this.onTap, required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        color: Colors.amber.shade700,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                message,
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

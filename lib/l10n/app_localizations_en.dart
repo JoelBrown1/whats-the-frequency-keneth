@@ -217,4 +217,8 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get calibrationTryAgain => 'Try again';
+
+  @override
+  String get mainsNotMeasuredWarning =>
+      'Mains frequency not yet measured — hum suppression is using the 50 Hz default. Tap to measure.';
 }

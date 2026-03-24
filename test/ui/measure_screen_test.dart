@@ -9,15 +9,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:whats_the_frequency/audio/audio_engine_platform_interface.dart';
 import 'package:whats_the_frequency/audio/audio_engine_service.dart';
 import 'package:whats_the_frequency/audio/models/capture_result.dart';
+import 'package:whats_the_frequency/audio/models/device_config.dart';
 import 'package:whats_the_frequency/audio/models/sweep_config.dart';
 import 'package:whats_the_frequency/calibration/calibration_service.dart';
 import 'package:whats_the_frequency/l10n/app_localizations.dart';
 import 'package:whats_the_frequency/providers/audio_engine_platform_provider.dart';
 import 'package:whats_the_frequency/providers/audio_engine_provider.dart';
 import 'package:whats_the_frequency/providers/calibration_provider.dart';
+import 'package:whats_the_frequency/providers/device_config_provider.dart';
 import 'package:whats_the_frequency/ui/screens/measure_screen.dart';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
@@ -66,8 +69,12 @@ _MockPlatform _buildMockPlatform() {
 Widget _wrapScreen({
   required _MockCalibrationService cal,
   AudioEngineServiceState? engineState,
+  DeviceConfig? deviceConfig,
 }) {
   final mock = _buildMockPlatform();
+  if (deviceConfig != null) {
+    SharedPreferences.setMockInitialValues({});
+  }
   final overrides = <Override>[
     audioEnginePlatformProvider.overrideWithValue(mock),
     calibrationProvider.overrideWith((_) => cal),
@@ -75,6 +82,8 @@ Widget _wrapScreen({
       audioEngineProvider.overrideWith(
         () => _FixedStateEngine(engineState),
       ),
+    if (deviceConfig != null)
+      deviceConfigProvider.overrideWith(() => _FixedDeviceConfig(deviceConfig)),
   ];
   return ProviderScope(
     overrides: overrides,
@@ -84,6 +93,16 @@ Widget _wrapScreen({
       home: const MeasureScreen(),
     ),
   );
+}
+
+// Notifier that immediately returns a fixed DeviceConfig without hitting
+// SharedPreferences. Used to inject specific device config in widget tests.
+class _FixedDeviceConfig extends DeviceConfigNotifier {
+  final DeviceConfig _config;
+  _FixedDeviceConfig(this._config);
+
+  @override
+  Future<DeviceConfig> build() async => _config;
 }
 
 void main() {
@@ -205,5 +224,49 @@ void main() {
 
     // After reset from any state, should be idle (Start button visible).
     expect(container.read(audioEngineProvider).state, AudioEngineState.idle);
+  });
+
+  // ─── Mains not-measured banner ─────────────────────────────────────────────
+
+  testWidgets(
+      'mains warning banner shown when mainsMeasured is false',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final cal = _MockCalibrationService();
+    when(() => cal.isCalibrationValid()).thenReturn(true);
+    when(() => cal.activeCalibration).thenReturn(null);
+
+    const config = DeviceConfig(
+      deviceUid: 'uid',
+      deviceName: 'Scarlett',
+      sampleRate: 48000,
+      mainsMeasured: false, // default — warning expected
+    );
+
+    await tester.pumpWidget(_wrapScreen(cal: cal, deviceConfig: config));
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.warning_amber_rounded), findsOneWidget);
+  });
+
+  testWidgets(
+      'mains warning banner NOT shown when mainsMeasured is true',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final cal = _MockCalibrationService();
+    when(() => cal.isCalibrationValid()).thenReturn(true);
+    when(() => cal.activeCalibration).thenReturn(null);
+
+    const config = DeviceConfig(
+      deviceUid: 'uid',
+      deviceName: 'Scarlett',
+      sampleRate: 48000,
+      mainsMeasured: true, // user has measured — no warning
+    );
+
+    await tester.pumpWidget(_wrapScreen(cal: cal, deviceConfig: config));
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.warning_amber_rounded), findsNothing);
   });
 }

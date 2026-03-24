@@ -10,6 +10,7 @@ import 'package:whats_the_frequency/l10n/l10n.dart';
 import 'package:whats_the_frequency/providers/audio_engine_platform_provider.dart';
 import 'package:whats_the_frequency/providers/available_devices_provider.dart';
 import 'package:whats_the_frequency/providers/calibration_provider.dart';
+import 'package:whats_the_frequency/audio/models/device_config.dart';
 import 'package:whats_the_frequency/providers/device_config_provider.dart';
 import 'package:whats_the_frequency/providers/level_meter_provider.dart';
 import 'package:whats_the_frequency/providers/sweep_config_provider.dart';
@@ -29,24 +30,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   OnboardingStep _currentStep = OnboardingStep.welcome;
   bool _levelConfirmed = false;
   bool _calibrationDone = false;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _restoreStep());
-  }
-
-  void _restoreStep() {
-    final config = ref.read(deviceConfigProvider).valueOrNull;
-    if (config != null && config.lastCompletedOnboardingStep > 0) {
-      setState(() {
-        _currentStep = OnboardingStep.fromIndex(
-          config.lastCompletedOnboardingStep
-              .clamp(0, OnboardingStep.values.length - 1),
-        );
-      });
-    }
-  }
+  bool _stepRestored = false;
 
   Future<void> _advance() async {
     final notifier = ref.read(deviceConfigProvider.notifier);
@@ -75,6 +59,22 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
+
+    // Restore the persisted step once when deviceConfigProvider first loads.
+    ref.listen<AsyncValue<DeviceConfig>>(deviceConfigProvider, (_, next) {
+      if (!_stepRestored && next.hasValue && mounted) {
+        _stepRestored = true;
+        final step = next.value!.lastCompletedOnboardingStep;
+        if (step > 0) {
+          setState(() {
+            _currentStep = OnboardingStep.fromIndex(
+              step.clamp(0, OnboardingStep.values.length - 1),
+            );
+          });
+        }
+      }
+    });
+
     return Scaffold(
       appBar: AppBar(title: Text(_stepTitle(l10n))),
       body: _buildStep(l10n),

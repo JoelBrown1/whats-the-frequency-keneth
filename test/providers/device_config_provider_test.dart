@@ -83,6 +83,17 @@ void main() {
       expect(notifier.state.value!.measuredMainsHz, 60.0);
     });
 
+    test('setMainsHz() sets mainsMeasured to true', () async {
+      final notifier = await _buildNotifier();
+      expect(notifier.state.value!.mainsMeasured, isFalse,
+          reason: 'mainsMeasured must be false on a fresh config');
+
+      await notifier.setMainsHz(50.0);
+
+      expect(notifier.state.value!.mainsMeasured, isTrue,
+          reason: 'Setting mains Hz — even to the default — marks it as measured');
+    });
+
     test('setCalibrationId() persists calibration id', () async {
       final notifier = await _buildNotifier();
       await notifier.setCalibrationId('cal-abc');
