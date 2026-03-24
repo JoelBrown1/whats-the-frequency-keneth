@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:whats_the_frequency/audio/models/device_config.dart';
 import 'package:whats_the_frequency/dsp/models/resonance_search_band.dart';
 import 'package:whats_the_frequency/providers/device_config_provider.dart';
+import 'package:whats_the_frequency/ui/screens/onboarding_step.dart';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -115,9 +116,10 @@ void main() {
 
     test('setOnboardingStep() updates lastCompletedOnboardingStep', () async {
       final notifier = await _buildNotifier();
-      await notifier.setOnboardingStep(3);
+      await notifier.setOnboardingStep(OnboardingStep.mains); // index 3
 
-      expect(notifier.state.value!.lastCompletedOnboardingStep, 3);
+      expect(notifier.state.value!.lastCompletedOnboardingStep,
+          OnboardingStep.mains.index);
     });
 
     test('completeOnboarding() sets onboardingComplete to true', () async {

@@ -42,17 +42,18 @@ Background threads push a `std::function<void()>` onto `pending_` (mutex-protect
 
 ---
 
-## Session 3 — CSV Export + Results Screen Export Action
+## Session 3 — CSV Export + Results Screen Export Action ✓ COMPLETE
 
 **Goal:** Complete the Results screen export action end-to-end.
 
-- [ ] `CsvExporter` class — locale-safe decimal formatting (`toStringAsFixed(4)`), REW-compatible headers (`Freq(Hz),SPL(dB)`), unit test asserting header row and a known first data line
-- [ ] Results screen Export action — wire `CsvExporter`; open system share sheet on macOS; write to `~/Downloads` as primary path
-- [ ] `sweepConfig` comparability guard — verify the overlay warning is wired when configs differ between measurements
-- [ ] Results screen Overlay action — confirm up to 5 overlaid measurements with distinct colours; confirm `sweepConfig` comparability guard fires
+- [x] `CsvExporter` class — already implemented at `lib/data/csv_exporter.dart`; REW header `Freq(Hz),SPL(dB)`, `toStringAsFixed(4)` throughout
+- [x] Results screen Export action — already wired in `_export()`; writes to `getDownloadsDirectory()` with fallback to documents; filename `wtfk_{Hz}Hz_Q{q}_{date}.csv`
+- [x] `sweepConfig` comparability guard — already wired in `_pickOverlay()`; SnackBar shown with `l10n.sweepConfigMismatchWarning` when configs differ
+- [x] Results screen Overlay action — already implemented; `_overlayResponse` / `_overlayLabel` state managed; overlay chart rendered via `FrequencyResponseChart`
+- [x] `CsvExporter` tests — 8 tests written in `test/data/csv_exporter_test.dart`; covers header, first/last data lines, line count, period separator, zero formatting, label exclusion
+- [x] `device_config_provider_test.dart` — updated `setOnboardingStep` call site to pass `OnboardingStep.mains` (type-safe, carries forward Session 2 change)
 
-**Files likely touched:**
-`lib/export/csv_exporter.dart` (new), `test/export/csv_exporter_test.dart` (new), `lib/ui/screens/results_screen.dart`
+**Test count: 74 passing (was 66 + 8 new)**
 
 ---
 
