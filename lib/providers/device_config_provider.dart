@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../audio/models/device_config.dart';
 import '../dsp/models/resonance_search_band.dart';
+import '../ui/screens/onboarding_step.dart';
 
 const _kDeviceConfigKey = 'device_config';
 
@@ -63,9 +64,9 @@ class DeviceConfigNotifier extends AsyncNotifier<DeviceConfig> {
     ));
   }
 
-  Future<void> setOnboardingStep(int stepIndex) async {
+  Future<void> setOnboardingStep(OnboardingStep step) async {
     final current = state.valueOrNull ?? _kDefaultConfig;
-    await _save(current.copyWith(lastCompletedOnboardingStep: stepIndex));
+    await _save(current.copyWith(lastCompletedOnboardingStep: step.index));
   }
 
   Future<void> setResonanceSearchBand(ResonanceSearchBand band) async {

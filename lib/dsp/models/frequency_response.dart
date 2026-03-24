@@ -6,6 +6,11 @@ import 'dart:math';
 import 'package:whats_the_frequency/audio/models/sweep_config.dart';
 
 /// A detected resonance peak within the frequency response.
+///
+/// Q-factor convention: `Q = f₀ / (fHighHz − fLowHz)` where [fLowHz] and
+/// [fHighHz] are the lower and upper −3 dB points relative to [magnitudeDb].
+/// A Q of 1.0 means the −3 dB bandwidth equals the centre frequency.
+/// Guitar pickup resonances typically fall in the range Q = 1–5.
 class ResonancePeak {
   final double frequencyHz;
   final double magnitudeDb;

@@ -211,6 +211,19 @@ private class AudioEngineImpl: NSObject, FlutterPlugin {
             return
         }
 
+        // Verify the hardware is actually running at the expected rate.
+        // If the OS has resampled to a different rate (e.g. 44.1 kHz), every
+        // frequency in the result will be shifted — surface this immediately.
+        let actualRate = engine.inputNode.outputFormat(forBus: 0).sampleRate
+        guard actualRate == Double(sampleRate) else {
+            teardownCapture(error: FlutterError(
+                code: "SAMPLE_RATE_MISMATCH",
+                message: "Device is running at \(Int(actualRate)) Hz, expected \(sampleRate) Hz. " +
+                         "Set the Scarlett 2i2 to \(sampleRate) Hz in Focusrite Control and try again.",
+                details: nil))
+            return
+        }
+
         // Schedule playback with 100 ms look-ahead for USB scheduling jitter.
         guard let renderTime = engine.outputNode.lastRenderTime else {
             teardownCapture(error: FlutterError(code: "NO_RENDER_TIME",

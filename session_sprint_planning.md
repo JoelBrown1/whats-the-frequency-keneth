@@ -26,18 +26,19 @@ Background threads push a `std::function<void()>` onto `pending_` (mutex-protect
 
 ---
 
-## Session 2 — Tier 4 Small Items (Low Effort, High Value)
+## Session 2 — Tier 4 Small Items (Low Effort, High Value) ✓ COMPLETE
 
 **Goal:** Clean up technical debt that is individually small but collectively meaningful.
 
-- [ ] `OnboardingStep` enum — wire into `OnboardingScreen` and `DeviceConfigProvider`; replace all magic integer comparisons
-- [ ] `ResonancePeak` — add doc comment explaining Q-factor convention (`Q = f₀ / (f_high − f_low)`, −3 dB points)
-- [ ] `FrequencyResponseChart` — wrap in `Semantics` with resonance Hz and Q-factor in the label
-- [ ] Dark / workshop theme — implement light and dark variants in `app_theme.dart`; set `ThemeMode.system`; ensure chart background colour comes from theme
-- [ ] Sample rate verification — after `AVAudioEngine` starts, verify active hardware rate equals 48 kHz; surface `DeviceError` if not (macOS Swift plugin)
+- [x] `OnboardingStep` enum — `setOnboardingStep(int)` → `setOnboardingStep(OnboardingStep)` in `DeviceConfigProvider`; `_advance()` and back-button in `OnboardingScreen` now pass enum values; `.index` called only at persistence boundary
+- [x] `ResonancePeak` — class-level doc comment added explaining `Q = f₀ / (fHighHz − fLowHz)`, −3 dB points, and typical pickup Q range (1–5)
+- [x] `FrequencyResponseChart` Semantics — already implemented; no changes needed
+- [x] Dark / workshop theme — `app_theme.dart` already has full light/dark variants with `AppChartTheme` extension; `main.dart` changed from `ThemeMode.dark` to `ThemeMode.system`
+- [x] Sample rate verification — added to `handleRunCapture` in `AudioEnginePlugin.swift` after `engine.start()`; checks `engine.inputNode.outputFormat(forBus: 0).sampleRate`; surfaces `SAMPLE_RATE_MISMATCH` with explicit Focusrite Control instruction if rate != expected
 
-**Files likely touched:**
-`lib/ui/screens/onboarding_screen.dart`, `lib/ui/screens/onboarding_step.dart`, `lib/providers/device_config_provider.dart`, `lib/dsp/models/frequency_response.dart`, `lib/ui/widgets/frequency_response_chart.dart`, `lib/ui/theme/app_theme.dart`, macOS Swift plugin
+**Implementation notes:**
+- `DeviceConfig.lastCompletedOnboardingStep` remains `int` for JSON serialisation; `.index` conversion happens inside `setOnboardingStep`.
+- `SAMPLE_RATE_MISMATCH` from Swift arrives as `PlatformException`, caught in `AudioEngineService.runCapture` → `_transitionToRecoverableError`; `MeasureScreen._ErrorBlock` already maps the code to `l10n.errorSampleRateMismatch`.
 
 ---
 

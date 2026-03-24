@@ -55,9 +55,10 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       if (mounted) context.go('/home');
       return;
     }
-    await notifier.setOnboardingStep(_currentStep.index + 1);
+    final nextStep = OnboardingStep.values[_currentStep.index + 1];
+    await notifier.setOnboardingStep(nextStep);
     setState(() {
-      _currentStep = OnboardingStep.values[_currentStep.index + 1];
+      _currentStep = nextStep;
       _levelConfirmed = false;
     });
   }
@@ -85,11 +86,11 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
             if (_currentStep != OnboardingStep.welcome)
               TextButton(
                 onPressed: () async {
+                  final prevStep = OnboardingStep.values[_currentStep.index - 1];
                   await ref
                       .read(deviceConfigProvider.notifier)
-                      .setOnboardingStep(_currentStep.index - 1);
-                  setState(
-                      () => _currentStep = OnboardingStep.values[_currentStep.index - 1]);
+                      .setOnboardingStep(prevStep);
+                  setState(() => _currentStep = prevStep);
                 },
                 child: Text(l10n.back),
               )
