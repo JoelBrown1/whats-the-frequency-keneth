@@ -170,16 +170,36 @@ Full flow: Welcome → Hardware Checklist → Device Selection → **Mains Frequ
 
 ## Session 9 — App Lifecycle / Background Handling
 
-**Goal:** Prevent silent corrupt captures when the OS suspends audio mid-sweep.
+**Goal:** Prevent silent corrupt captures when the OS suspends audio mid-sweep, and surface clean error messages for both backgrounding and audio session interruptions.
 
-- [ ] macOS — subscribe to `NSApplication.willResignActiveNotification`; if state is `Playing` or `Capturing`, abort and transition to `RecoverableError(AppBackgrounded)`
-- [ ] macOS — subscribe to `NSApplication.didBecomeActiveNotification`; re-activate audio session and offer retry
-- [ ] iOS (when iOS work begins) — same pattern via `UIApplication` notifications
-- [ ] `RecoverableError(AppBackgrounded)` — confirm localised message wired in `MeasureScreen._ErrorBlock`
-- [ ] Audio session interruptions — subscribe to `AVAudioEngine` configuration change notifications; transition to `RecoverableError(Interrupted)` on receipt
+**Pre-built (already in codebase — verify, don't rewrite):**
+- `AudioEngineService.backgroundInterrupted()` — transitions to `recoverableError('APP_BACKGROUNDED')` only when `_isActiveMeasurementState` is true; no-op otherwise
+- `MeasureScreen` uses `WidgetsBindingObserver.didChangeAppLifecycleState` — calls `backgroundInterrupted()` on `AppLifecycleState.paused` or `.inactive`; observer registered in `initState`, removed in `dispose`
+- `_localiseError` — `'APP_BACKGROUNDED'` → `l10n.errorAppBackgrounded`; default case → `l10n.errorInterrupted` (covers `'INTERRUPTED'`)
+- l10n strings `errorAppBackgrounded` and `errorInterrupted` present in `app_en.arb`, `app_localizations.dart`, `app_localizations_en.dart`
 
-**Files likely touched:**
-macOS Swift plugin, `lib/audio/audio_engine_service.dart`, `lib/ui/screens/measure_screen.dart`, `lib/l10n/app_en.arb`
+**New work:**
+
+- [ ] **Swift — `AVAudioEngineConfigurationChangeNotification`**: In `AudioEngineImpl.init()`, subscribe to `AVAudioEngineConfigurationChangeNotification` on `NotificationCenter.default`. Handler: emit `['event': 'audioInterrupted']` via `deviceEventsSink`; if `pendingCaptureResult != nil`, call `teardownCapture(error: FlutterError(code: "INTERRUPTED", message: "Audio session configuration changed", details: nil))`. Unsubscribe token stored as `private var _configChangeObserver: NSObjectProtocol?`; removed in a `deinit`.
+- [ ] **Dart — `_subscribeToDeviceEvents()`**: Add an `else if` branch for `event['event'] == 'audioInterrupted'` → `_transitionToRecoverableError('INTERRUPTED', 'Audio session interrupted.')`. No changes needed to `_localiseError` — the default branch already maps to `errorInterrupted`.
+- [ ] **`NSApplication` lifecycle via Flutter**: macOS background interruption is already fully handled by the Flutter `AppLifecycleState.inactive` path above. No native `willResignActiveNotification` subscription is needed — it would be redundant. `didBecomeActiveNotification` / re-activate is covered by the existing `reset()` + user retry flow.
+- [ ] **Tests** — add to `test/audio/audio_engine_service_test.dart` (3 unit tests):
+  - `backgroundInterrupted() during capturing → recoverableError with APP_BACKGROUNDED`
+  - `backgroundInterrupted() during idle → state remains idle (no-op)`
+  - `audioInterrupted device event → recoverableError with INTERRUPTED`
+- [ ] **Tests** — add to `test/ui/measure_screen_test.dart` (2 widget tests):
+  - Lifecycle `paused` while engine is armed → `_ErrorBlock` displays `errorAppBackgrounded` string
+  - Lifecycle `inactive` while engine is capturing → same `_ErrorBlock` shown
+
+**Implementation notes:**
+- `AVAudioEngineConfigurationChangeNotification` fires on the main thread when the hardware device changes underneath a running engine (e.g. sample rate switch, default device change). It fires even when the app is foregrounded, so the `pendingCaptureResult` guard is essential — only abort if a capture is actually in flight.
+- The configuration-change notification does NOT fire for app backgrounding on macOS; those are handled by the Flutter lifecycle path. The two paths are complementary, not overlapping.
+- Widget tests for lifecycle changes: call `tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused)` after pumping the widget tree with the engine in `armed` state; then `pumpAndSettle` and assert `_ErrorBlock` is visible.
+
+**Test count: 127 passing (was 122 + 5 new)**
+
+**Files touched:**
+`macos/Runner/AudioEnginePlugin.swift`, `lib/audio/audio_engine_service.dart`, `test/audio/audio_engine_service_test.dart`, `test/ui/measure_screen_test.dart`
 
 ---
 
