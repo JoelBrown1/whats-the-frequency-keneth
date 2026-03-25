@@ -151,17 +151,20 @@ Full flow: Welcome → Hardware Checklist → Device Selection → **Mains Frequ
 
 ---
 
-## Session 8 — Checkpoint Resume Tests + TransferableTypedData
+## Session 8 — Checkpoint Resume Tests + TransferableTypedData ✅
 
 **Goal:** Cover the checkpoint resume flow and reduce PCM copy overhead.
 
-- [ ] `CaptureCheckpointService` tests — write N sweeps; reload; assert sample count and config match; assert resume offered when config matches; assert discard when config differs
-- [ ] `MeasureScreen` resume flow test — mock checkpoint service returning pre-loaded sweeps; assert screen offers resume; assert sweep loop starts at `pass = preloaded.length`
-- [ ] `TransferableTypedData` — replace `SendPort.send(Float32List)` with `TransferableTypedData.fromList([samples])` in `AudioEngineMethodChannel` → `DspWorker` transfer path; update receiving side in `dsp_isolate.dart`
-- [ ] Dynamic pre-roll (stretch) — read `kAudioDevicePropertyBufferFrameSize` after engine start; compute pre-roll as `bufferSize × 4` rather than hardcoded value
+- [x] `CaptureCheckpointService` — added `{Directory? testDirectory}` constructor param for test injection
+- [x] `captureCheckpointProvider` — new `Provider<CaptureCheckpointService>` (overridable in tests)
+- [x] `MeasureScreen` — refactored to consume `captureCheckpointProvider` instead of direct instantiation
+- [x] `alignmentComputerProvider` — new provider wrapping `Isolate.run(computeAlignmentOffset)` so widget tests can override with a synchronous stub
+- [x] `TransferableTypedData` — rewrote `DspWorker` to use `_WorkerMessage` with `TransferableTypedData` for zero-copy PCM transfer across isolate boundary
+- [x] `test/audio/capture_checkpoint_test.dart` — 9 unit tests (all pass): null config, round-trip, empty captures, sweep-order sorting, hasCheckpoint variants, clear, corrupt file skip
+- [x] `test/ui/measure_screen_checkpoint_test.dart` — 3 widget tests (all pass): config mismatch clears checkpoint, all preloaded skips runCapture, partial preload calls runCapture once
 
-**Files likely touched:**
-`test/audio/capture_checkpoint_test.dart` (new), `test/ui/measure_screen_resume_test.dart` (new), `lib/audio/audio_engine_method_channel.dart`, `lib/dsp/dsp_isolate.dart`
+**Files touched:**
+`lib/data/capture_checkpoint_service.dart`, `lib/providers/capture_checkpoint_provider.dart` (new), `lib/providers/alignment_provider.dart` (new), `lib/ui/screens/measure_screen.dart`, `lib/dsp/dsp_worker.dart`, `test/audio/capture_checkpoint_test.dart` (new), `test/ui/measure_screen_checkpoint_test.dart` (new)
 
 ---
 

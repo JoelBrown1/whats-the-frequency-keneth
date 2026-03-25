@@ -17,8 +17,17 @@ import 'package:whats_the_frequency/audio/models/sweep_config.dart';
 class CaptureCheckpointService {
   Directory? _dir;
 
+  /// [testDirectory] — if provided, bypasses [path_provider] and uses
+  /// the supplied directory directly. Intended for unit testing only.
+  CaptureCheckpointService({Directory? testDirectory})
+      : _dir = testDirectory;
+
   Future<Directory> _getDir() async {
-    if (_dir != null) return _dir!;
+    if (_dir != null) {
+      // May have been injected as testDirectory — ensure it exists.
+      if (!await _dir!.exists()) await _dir!.create(recursive: true);
+      return _dir!;
+    }
     final base = await getApplicationSupportDirectory();
     final dir = Directory('${base.path}/checkpoints');
     if (!await dir.exists()) await dir.create(recursive: true);

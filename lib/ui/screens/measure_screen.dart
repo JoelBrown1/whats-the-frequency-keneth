@@ -2,23 +2,21 @@
 // Measurement screen. Blocked if no valid calibration exists.
 // Full flow: arm → sweep loop → DSP → navigate to ResultsScreen.
 
-import 'dart:isolate';
 import 'dart:typed_data';
-
-import 'package:whats_the_frequency/data/capture_checkpoint_service.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:whats_the_frequency/audio/audio_engine_service.dart';
 import 'package:whats_the_frequency/audio/models/capture_result.dart';
-import 'package:whats_the_frequency/dsp/dsp_isolate.dart';
 import 'package:whats_the_frequency/dsp/log_sine_sweep.dart';
 import 'package:whats_the_frequency/dsp/models/frequency_response.dart';
 import 'package:whats_the_frequency/dsp/models/resonance_search_band.dart';
 import 'package:whats_the_frequency/l10n/l10n.dart';
+import 'package:whats_the_frequency/providers/alignment_provider.dart';
 import 'package:whats_the_frequency/providers/audio_engine_provider.dart';
 import 'package:whats_the_frequency/providers/calibration_provider.dart';
+import 'package:whats_the_frequency/providers/capture_checkpoint_provider.dart';
 import 'package:whats_the_frequency/providers/device_config_provider.dart';
 import 'package:whats_the_frequency/providers/dsp_provider.dart';
 import 'package:whats_the_frequency/providers/sweep_config_provider.dart';
@@ -126,7 +124,6 @@ class _MeasureContentState extends ConsumerState<_MeasureContent>
     with WidgetsBindingObserver {
   int _sweepPass = 0;
   int _sweepTotal = 1;
-  final _checkpoint = CaptureCheckpointService();
 
   @override
   void initState() {
@@ -151,6 +148,7 @@ class _MeasureContentState extends ConsumerState<_MeasureContent>
   Future<void> _startMeasurement() async {
     final engine = ref.read(audioEngineProvider.notifier);
     final dsp = ref.read(dspProvider);
+    final computeAlignment = ref.read(alignmentComputerProvider);
     final calibration = ref.read(calibrationProvider).activeCalibration!;
     final config = ref.read(sweepConfigProvider);
     final deviceConfig = ref.read(deviceConfigProvider).valueOrNull;
@@ -174,17 +172,17 @@ class _MeasureContentState extends ConsumerState<_MeasureContent>
     // If a previous measurement was interrupted, offer to resume the already-
     // captured sweeps rather than starting from scratch.
     List<CaptureResult> preloadedCaptures = [];
-    if (await _checkpoint.hasCheckpoint()) {
-      final savedConfig = await _checkpoint.readConfig();
+    if (await ref.read(captureCheckpointProvider).hasCheckpoint()) {
+      final savedConfig = await ref.read(captureCheckpointProvider).readConfig();
       if (savedConfig == config) {
-        preloadedCaptures = await _checkpoint.readCaptures(config);
+        preloadedCaptures = await ref.read(captureCheckpointProvider).readCaptures(config);
       } else {
-        await _checkpoint.clear();
+        await ref.read(captureCheckpointProvider).clear();
       }
     }
 
     // Persist config so a crash mid-loop is resumable.
-    await _checkpoint.writeConfig(config);
+    await ref.read(captureCheckpointProvider).writeConfig(config);
 
     try {
       engine.arm();
@@ -207,8 +205,7 @@ class _MeasureContentState extends ConsumerState<_MeasureContent>
         final capture = await engine.runCapture(config, sweepSamples);
 
         // Compute cross-correlation alignment offset in a background isolate.
-        final offset = await Isolate.run(() =>
-            computeAlignmentOffset(capture.samples, sweep.inverseFilter));
+        final offset = await computeAlignment(capture.samples, sweep.inverseFilter);
 
         if (baselineOffset == null) {
           // Sweep 0: validate offset is within plausible USB round-trip range.
@@ -228,7 +225,7 @@ class _MeasureContentState extends ConsumerState<_MeasureContent>
 
         captures.add(capture);
         // Persist each accepted capture immediately.
-        await _checkpoint.writeCapture(captures.length - 1, capture);
+        await ref.read(captureCheckpointProvider).writeCapture(captures.length - 1, capture);
         pass++;
 
         // Golden-ratio inter-sweep delay for mains hum cancellation.
@@ -252,7 +249,7 @@ class _MeasureContentState extends ConsumerState<_MeasureContent>
 
     engine.completeAnalysis(captures.last);
     // All sweeps successfully processed — checkpoint no longer needed.
-    await _checkpoint.clear();
+    await ref.read(captureCheckpointProvider).clear();
 
     if (mounted) {
       context.push('/results', extra: response);
@@ -282,7 +279,7 @@ class _MeasureContentState extends ConsumerState<_MeasureContent>
         sweepTotal: _sweepTotal,
         onCancel: () async {
           await ref.read(audioEngineProvider.notifier).cancelCapture();
-          await _checkpoint.clear();
+          await ref.read(captureCheckpointProvider).clear();
         },
       );
     }
