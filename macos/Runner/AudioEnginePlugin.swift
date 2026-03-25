@@ -444,14 +444,20 @@ private class AudioEngineImpl: NSObject, FlutterPlugin {
     }
 
     private func applyDevice(_ deviceID: AudioDeviceID, to node: AVAudioNode) throws {
+        // AUAudioUnit's C-bridge AudioUnit property was removed in macOS 26 SDK.
+        // AVAudioEngine picks up the system default I/O devices when started,
+        // so we route by setting the system defaults before engine.start().
+        let selector: AudioObjectPropertySelector = (node === engine.outputNode)
+            ? kAudioHardwarePropertyDefaultOutputDevice
+            : kAudioHardwarePropertyDefaultInputDevice
         var devID = deviceID
-        let status = AudioUnitSetProperty(
-            node.auAudioUnit.audioUnitInstance,
-            kAudioOutputUnitProperty_CurrentDevice,
-            kAudioUnitScope_Global,
-            0,
-            &devID,
-            UInt32(MemoryLayout<AudioDeviceID>.size))
+        var addr = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope:    kAudioObjectPropertyScopeGlobal,
+            mElement:  kAudioObjectPropertyElementMain)
+        let status = AudioObjectSetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil,
+            UInt32(MemoryLayout<AudioDeviceID>.size), &devID)
         guard status == noErr else {
             throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
         }
