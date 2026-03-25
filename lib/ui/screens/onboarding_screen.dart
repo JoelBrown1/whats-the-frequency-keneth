@@ -84,23 +84,29 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             if (_currentStep != OnboardingStep.welcome) ...[
-              TextButton(
-                onPressed: () async {
-                  final prevStep = OnboardingStep.values[_currentStep.index - 1];
-                  await ref
-                      .read(deviceConfigProvider.notifier)
-                      .setOnboardingStep(prevStep);
-                  setState(() => _currentStep = prevStep);
-                },
-                child: Text(l10n.back),
+              SizedBox(
+                width: 120,
+                child: OutlinedButton(
+                  onPressed: () async {
+                    final prevStep = OnboardingStep.values[_currentStep.index - 1];
+                    await ref
+                        .read(deviceConfigProvider.notifier)
+                        .setOnboardingStep(prevStep);
+                    setState(() => _currentStep = prevStep);
+                  },
+                  child: Text(l10n.back),
+                ),
               ),
               const SizedBox(width: 20),
             ],
-            ElevatedButton(
-              onPressed: _canAdvance() ? _advance : null,
-              child: Text(_currentStep == OnboardingStep.calibration
-                  ? l10n.startMeasuring
-                  : l10n.next),
+            SizedBox(
+              width: 120,
+              child: OutlinedButton(
+                onPressed: _canAdvance() ? _advance : null,
+                child: Text(_currentStep == OnboardingStep.calibration
+                    ? l10n.startMeasuring
+                    : l10n.next),
+              ),
             ),
           ],
         ),
