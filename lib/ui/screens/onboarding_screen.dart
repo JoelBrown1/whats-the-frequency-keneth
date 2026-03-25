@@ -79,11 +79,11 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       appBar: AppBar(title: Text(_stepTitle(l10n))),
       body: _buildStep(l10n),
       bottomNavigationBar: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: const EdgeInsets.only(bottom: 60),
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            if (_currentStep != OnboardingStep.welcome)
+            if (_currentStep != OnboardingStep.welcome) ...[
               TextButton(
                 onPressed: () async {
                   final prevStep = OnboardingStep.values[_currentStep.index - 1];
@@ -93,9 +93,9 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                   setState(() => _currentStep = prevStep);
                 },
                 child: Text(l10n.back),
-              )
-            else
-              const SizedBox.shrink(),
+              ),
+              const SizedBox(width: 20),
+            ],
             ElevatedButton(
               onPressed: _canAdvance() ? _advance : null,
               child: Text(_currentStep == OnboardingStep.calibration

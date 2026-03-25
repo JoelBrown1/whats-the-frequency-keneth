@@ -19,13 +19,15 @@ class DevicePicker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (devices.isEmpty) {
-      return const Text('No audio devices found',
+      return const Text('No audio device detected',
           style: TextStyle(color: Colors.orange));
     }
 
+    final effectiveValue = devices.any((d) => d.uid == selectedUid) ? selectedUid : null;
+
     return DropdownButton<String>(
       isExpanded: true,
-      value: selectedUid,
+      value: effectiveValue,
       hint: const Text('Select audio interface'),
       items: devices.map((d) {
         return DropdownMenuItem<String>(
