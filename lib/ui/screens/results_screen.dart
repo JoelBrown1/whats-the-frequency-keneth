@@ -58,6 +58,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
             child: FrequencyResponseChart(
               frequencyResponse: response,
               overlayResponse: _overlayResponse,
+              primaryLabel: 'Current',
               overlayLabel: _overlayLabel,
               searchBand: ref.read(deviceConfigProvider).valueOrNull?.resonanceSearchBand,
             ),

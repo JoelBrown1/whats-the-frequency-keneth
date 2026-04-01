@@ -17,6 +17,9 @@ import 'package:whats_the_frequency/ui/widgets/search_band_overlay.dart';
 const double _minFreq = kChartMinFreqHz;
 const double _maxFreq = kChartMaxFreqHz;
 
+const Color _kPrimaryColor = Colors.tealAccent;
+const Color _kOverlayColor = Colors.orangeAccent;
+
 double _log10(double x) => log(x) / ln10;
 
 /// Convert a chart x-coordinate back to Hz using the inverse log transform.
@@ -30,6 +33,7 @@ double chartXToFrequency(double chartX, double chartWidth) {
 class FrequencyResponseChart extends StatefulWidget {
   final FrequencyResponse? frequencyResponse;
   final FrequencyResponse? overlayResponse;
+  final String? primaryLabel;
   final String? overlayLabel;
   final ResonanceSearchBand? searchBand;
 
@@ -37,6 +41,7 @@ class FrequencyResponseChart extends StatefulWidget {
     super.key,
     this.frequencyResponse,
     this.overlayResponse,
+    this.primaryLabel,
     this.overlayLabel,
     this.searchBand,
   });
@@ -48,9 +53,9 @@ class FrequencyResponseChart extends StatefulWidget {
 class _FrequencyResponseChartState extends State<FrequencyResponseChart> {
   double? _cursorHz;
   double? _cursorDb;
-  double? _cursorOverlayDb;
+  double? _cursorOverlayDb; // nullable: absent until overlay is loaded
 
-  double? _nearestDb(FrequencyResponse response, double hz) {
+  double _nearestDb(FrequencyResponse response, double hz) {
     double nearestDb = 0;
     double nearestDist = double.infinity;
     for (int i = 0; i < response.frequencyHz.length; i++) {
@@ -96,6 +101,11 @@ class _FrequencyResponseChartState extends State<FrequencyResponseChart> {
             child: Stack(
               children: [
                 _buildChart(response),
+                if (response != null && widget.overlayResponse != null)
+                  _buildLegend(
+                    primaryLabel: widget.primaryLabel ?? 'Current',
+                    overlayLabel: widget.overlayLabel ?? 'Overlay',
+                  ),
                 if (_cursorHz != null && _cursorDb != null)
                   Positioned(
                     top: 8,
@@ -115,14 +125,14 @@ class _FrequencyResponseChartState extends State<FrequencyResponseChart> {
                             '${_cursorHz!.toStringAsFixed(0)} Hz  '
                             '${_cursorDb!.toStringAsFixed(1)} dB',
                             style: const TextStyle(
-                                color: Colors.tealAccent, fontSize: 12),
+                                color: _kPrimaryColor, fontSize: 12),
                           ),
                           if (_cursorOverlayDb != null)
                             Text(
                               '${widget.overlayLabel ?? 'Overlay'}: '
                               '${_cursorOverlayDb!.toStringAsFixed(1)} dB',
                               style: const TextStyle(
-                                  color: Colors.orangeAccent, fontSize: 12),
+                                  color: _kOverlayColor, fontSize: 12),
                             ),
                         ],
                       ),
@@ -132,6 +142,55 @@ class _FrequencyResponseChartState extends State<FrequencyResponseChart> {
             ),
           );
         },
+      ),
+    );
+  }
+
+  static Widget _buildLegend({
+    required String primaryLabel,
+    required String overlayLabel,
+  }) {
+    return Positioned(
+      top: 8,
+      left: 48,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.7),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _legendEntry(color: _kPrimaryColor, dashed: false, label: primaryLabel),
+            _legendEntry(color: _kOverlayColor, dashed: true, label: overlayLabel),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static Widget _legendEntry({
+    required Color color,
+    required bool dashed,
+    required String label,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 20,
+            height: 12,
+            child: CustomPaint(
+              painter: _LineSwatch(color: color, dashed: dashed),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(label, style: TextStyle(color: color, fontSize: 11)),
+        ],
       ),
     );
   }
@@ -167,7 +226,7 @@ class _FrequencyResponseChartState extends State<FrequencyResponseChart> {
             spots: spots,
             isCurved: false,
             dotData: const FlDotData(show: false),
-            color: Colors.tealAccent,
+            color: _kPrimaryColor,
             barWidth: 1.5,
           ),
           if (overlaySpots.isNotEmpty)
@@ -175,7 +234,7 @@ class _FrequencyResponseChartState extends State<FrequencyResponseChart> {
               spots: overlaySpots,
               isCurved: false,
               dotData: const FlDotData(show: false),
-              color: Colors.orangeAccent,
+              color: _kOverlayColor,
               barWidth: 1.5,
               dashArray: [4, 4],
             ),
@@ -233,4 +292,37 @@ class _FrequencyResponseChartState extends State<FrequencyResponseChart> {
       ],
     );
   }
+}
+
+class _LineSwatch extends CustomPainter {
+  final Color color;
+  final bool dashed;
+
+  const _LineSwatch({required this.color, required this.dashed});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+
+    final y = size.height / 2;
+    if (dashed) {
+      const dashWidth = 4.0;
+      const gapWidth = 4.0;
+      double x = 0;
+      while (x < size.width) {
+        final end = (x + dashWidth).clamp(0.0, size.width);
+        canvas.drawLine(Offset(x, y), Offset(end, y), paint);
+        x += dashWidth + gapWidth;
+      }
+    } else {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_LineSwatch old) =>
+      old.color != color || old.dashed != dashed;
 }
