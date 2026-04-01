@@ -3,14 +3,12 @@
 A guitar pickup resonance frequency analyser for macOS. Measure and visualise the resonant frequency of guitar pickups to better understand their tonal characteristics.
  
 ## Sources for research
-Ken Willmott is the author of the Pickup-Wizard-V10-.pdf document found in the resource directory of this project.
+Helmut Keller is the author of the Pickup-Wizard-V10-.pdf document found in the resource directory of this project. (https://www.helmutkelleraudio.de/)
+His research includes a range of topics - all worth exploring.
 
-Ken Willmott's research (including a range of guitar type related topics): https://www.helmutkelleraudio.de/
+There is a post specifically about the pickup-wizard where you can download his whitepaper and software she wrote. 
 
-There is a post specifically about the pickup-wizard where you can download 
-the whitepaper and software he wrote. 
-
-blog post can be found here: https://kenwillmott.com/blog/archives/152 - it outlines the entire approach to measuring a pickup resonant frequency.
+Ken Willmott also has done some research into the measurement of frequency resonance in guitar pickups using an activating coils: https://kenwillmott.com/blog/archives/152 - it outlines the entire approach to measuring a pickup resonant frequency.
 
 ## Requirements
 
