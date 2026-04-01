@@ -6,8 +6,10 @@ A guitar pickup resonance frequency analyser for macOS. Measure and visualise th
 Ken Willmott is the author of the Pickup-Wizard-V10-.pdf document found in the resource directory of this project.
 
 Ken Willmott's research (including a range of guitar type related topics): https://www.helmutkelleraudio.de/
+
 there is a post specifically about the pickup-wizard where you can download 
 the archived blog post can be found here: https://kenwillmott.com/blog/archives/152
+
 He has additional information in his blog: https://kenwillmott.com/blog/
 
 ## Requirements
