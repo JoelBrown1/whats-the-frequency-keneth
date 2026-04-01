@@ -7,10 +7,10 @@ Ken Willmott is the author of the Pickup-Wizard-V10-.pdf document found in the r
 
 Ken Willmott's research (including a range of guitar type related topics): https://www.helmutkelleraudio.de/
 
-there is a post specifically about the pickup-wizard where you can download 
-the archived blog post can be found here: https://kenwillmott.com/blog/archives/152
+There is a post specifically about the pickup-wizard where you can download 
+the whitepaper and software he wrote. 
 
-He has additional information in his blog: https://kenwillmott.com/blog/
+blog post can be found here: https://kenwillmott.com/blog/archives/152 - it outlines the entire approach to measuring a pickup resonant frequency.
 
 ## Requirements
 
