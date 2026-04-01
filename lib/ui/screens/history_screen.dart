@@ -8,6 +8,7 @@ import 'package:whats_the_frequency/data/models/measurement_summary.dart';
 import 'package:whats_the_frequency/dsp/models/frequency_response.dart';
 import 'package:whats_the_frequency/l10n/l10n.dart';
 import 'package:whats_the_frequency/providers/measurement_provider.dart';
+import 'package:whats_the_frequency/ui/screens/import_csv_screen.dart';
 
 class HistoryScreen extends ConsumerStatefulWidget {
   /// When true, tapping a measurement pops with its FrequencyResponse
@@ -42,6 +43,13 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     }
   }
 
+  Future<void> _importCsv() async {
+    final imported = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => const ImportCsvScreen()),
+    );
+    if (imported == true) _loadSummaries();
+  }
+
   Future<void> _selectSummary(MeasurementSummary summary) async {
     if (!widget.selectionMode) return;
     final repo = ref.read(measurementRepositoryProvider);
@@ -60,7 +68,12 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             ? AppLocalizations.of(context)!.historySelectMeasurement
             : AppLocalizations.of(context)!.historyTitle),
         actions: [
-          if (!widget.selectionMode)
+          if (!widget.selectionMode) ...[
+            IconButton(
+              icon: const Icon(Icons.upload_file_outlined),
+              tooltip: AppLocalizations.of(context)!.historyImportCsv,
+              onPressed: _importCsv,
+            ),
             Row(
               children: [
                 Text(AppLocalizations.of(context)!.historyGroupByPickup),
@@ -70,6 +83,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                 ),
               ],
             ),
+          ],
         ],
       ),
       body: _isLoading

@@ -483,6 +483,48 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Mains frequency not yet measured — hum suppression is using the 50 Hz default. Tap to measure.'**
   String get mainsNotMeasuredWarning;
+
+  /// Tooltip for the import CSV button in the history screen AppBar
+  ///
+  /// In en, this message translates to:
+  /// **'Import CSV'**
+  String get historyImportCsv;
+
+  /// Title for the import CSV screen
+  ///
+  /// In en, this message translates to:
+  /// **'Import CSV'**
+  String get importCsvTitle;
+
+  /// Button label to open the file picker
+  ///
+  /// In en, this message translates to:
+  /// **'Select CSV File'**
+  String get importCsvSelectFile;
+
+  /// Hint text on the import idle state
+  ///
+  /// In en, this message translates to:
+  /// **'Select a CSV file exported from this app or compatible measurement software (Freq(Hz),SPL(dB)).'**
+  String get importCsvHint;
+
+  /// Card title showing the auto-detected resonance result
+  ///
+  /// In en, this message translates to:
+  /// **'Detected Resonance'**
+  String get importCsvDetectedResonance;
+
+  /// Label for the resonance frequency stat
+  ///
+  /// In en, this message translates to:
+  /// **'Frequency'**
+  String get importCsvFrequency;
+
+  /// Label for the Q factor stat
+  ///
+  /// In en, this message translates to:
+  /// **'Q Factor'**
+  String get importCsvQFactor;
 }
 
 class _AppLocalizationsDelegate

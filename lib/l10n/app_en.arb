@@ -331,5 +331,40 @@
   "mainsNotMeasuredWarning": "Mains frequency not yet measured — hum suppression is using the 50 Hz default. Tap to measure.",
   "@mainsNotMeasuredWarning": {
     "description": "Warning banner when mains frequency has never been measured"
+  },
+
+  "historyImportCsv": "Import CSV",
+  "@historyImportCsv": {
+    "description": "Tooltip for the import CSV button in the history screen AppBar"
+  },
+
+  "importCsvTitle": "Import CSV",
+  "@importCsvTitle": {
+    "description": "Title for the import CSV screen"
+  },
+
+  "importCsvSelectFile": "Select CSV File",
+  "@importCsvSelectFile": {
+    "description": "Button label to open the file picker"
+  },
+
+  "importCsvHint": "Select a CSV file exported from this app or compatible measurement software (Freq(Hz),SPL(dB)).",
+  "@importCsvHint": {
+    "description": "Hint text on the import idle state"
+  },
+
+  "importCsvDetectedResonance": "Detected Resonance",
+  "@importCsvDetectedResonance": {
+    "description": "Card title showing the auto-detected resonance result"
+  },
+
+  "importCsvFrequency": "Frequency",
+  "@importCsvFrequency": {
+    "description": "Label for the resonance frequency stat"
+  },
+
+  "importCsvQFactor": "Q Factor",
+  "@importCsvQFactor": {
+    "description": "Label for the Q factor stat"
   }
 }

@@ -221,4 +221,26 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get mainsNotMeasuredWarning =>
       'Mains frequency not yet measured — hum suppression is using the 50 Hz default. Tap to measure.';
+
+  @override
+  String get historyImportCsv => 'Import CSV';
+
+  @override
+  String get importCsvTitle => 'Import CSV';
+
+  @override
+  String get importCsvSelectFile => 'Select CSV File';
+
+  @override
+  String get importCsvHint =>
+      'Select a CSV file exported from this app or compatible measurement software (Freq(Hz),SPL(dB)).';
+
+  @override
+  String get importCsvDetectedResonance => 'Detected Resonance';
+
+  @override
+  String get importCsvFrequency => 'Frequency';
+
+  @override
+  String get importCsvQFactor => 'Q Factor';
 }

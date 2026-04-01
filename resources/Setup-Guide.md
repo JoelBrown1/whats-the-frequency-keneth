@@ -164,6 +164,47 @@ Hold the exciter coil directly over the pickup, as close as possible without tou
 
 ---
 
+## Part 6 — Re-importing a Previous Profile
+
+If you previously exported a measurement as a CSV file, you can load it back into the app at any time to see the pickup's frequency curve and resonance data again — without needing the hardware connected.
+
+> This is useful if you want to compare an old measurement to a new one, or if you've switched to a new device and want your historical data back.
+
+### Step 17 — Find your exported CSV file
+
+Exported files are saved to your **Downloads** folder (or **Documents** if Downloads wasn't available) with a filename like:
+
+```
+wtfk_3456Hz_Q2.3_2026-03-31.csv
+```
+
+The frequency and Q values in the filename are the detected resonance from when you exported it.
+
+### Step 18 — Open the History screen and tap Import
+
+1. In the app, go to the **History** tab
+2. Tap the **Import CSV** button in the top-right corner (the upload icon)
+3. Your device's file browser will open — navigate to your CSV file and select it
+
+### Step 19 — Review the detected resonance
+
+The app reads the frequency response data from the CSV and automatically re-runs peak detection using the same algorithm as a live measurement. You'll see:
+
+- **Frequency** — the resonance peak in Hz
+- **Q Factor** — how sharp the peak is
+
+> These values should match what was shown when you originally took the measurement.
+
+### Step 20 — Name it and save
+
+1. Give the measurement a label (the app will pre-fill the filename as a suggestion)
+2. Optionally link it to an existing pickup in your library, or create a new one
+3. Tap **Save**
+
+The imported measurement will now appear in your History alongside your live measurements and can be used for overlay comparison on the Results screen.
+
+---
+
 ## Things That Can Go Wrong
 
 | Problem | What to do |
