@@ -11,5 +11,5 @@ import '../audio/mock_audio_engine_platform.dart';
 
 final audioEnginePlatformProvider =
     Provider<AudioEnginePlatformInterface>((ref) {
-  return kDebugMode ? MockAudioEnginePlatform() : AudioEngineMethodChannel();
+  return AudioEngineMethodChannel();
 });

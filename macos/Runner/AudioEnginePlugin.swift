@@ -305,6 +305,7 @@ private class AudioEngineImpl: NSObject, FlutterPlugin {
 
     private func handleStartLevelMeter(result: FlutterResult) {
         guard !inputTapActive else { result(nil); return }
+        peakDbfs = -160.0
         do {
             try prepareEngine(sampleRate: 48000)
             let fmt = engine.inputNode.outputFormat(forBus: 0)

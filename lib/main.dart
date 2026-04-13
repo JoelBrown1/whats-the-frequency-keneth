@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:whats_the_frequency/l10n/app_localizations.dart';
+import 'package:whats_the_frequency/providers/audio_engine_platform_provider.dart';
 import 'package:whats_the_frequency/providers/device_config_provider.dart';
 import 'package:whats_the_frequency/routing/app_router.dart';
 
@@ -46,6 +47,9 @@ class SplashScreen extends ConsumerWidget {
     return configAsync.when(
       data: (config) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (config.deviceUid.isNotEmpty) {
+            ref.read(audioEnginePlatformProvider).setDevice(config.deviceUid);
+          }
           final route = config.onboardingComplete ? '/home' : '/onboarding';
           context.go(route);
         });

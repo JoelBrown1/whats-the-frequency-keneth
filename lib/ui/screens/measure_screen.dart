@@ -197,6 +197,8 @@ class _MeasureContentState extends ConsumerState<_MeasureContent>
 
     // Sweep-0 baseline alignment offset (in samples).
     int? baselineOffset;
+    const maxRetries = 10;
+    int retryCount = 0;
 
     try {
       int pass = captures.length; // resume from where we left off
@@ -211,16 +213,28 @@ class _MeasureContentState extends ConsumerState<_MeasureContent>
           // Sweep 0: validate offset is within plausible USB round-trip range.
           if (offset.abs() > 500) {
             // Bad baseline — discard and retry without counting the pass.
+            retryCount++;
+            if (retryCount >= maxRetries) {
+              engine.processingFailed();
+              return;
+            }
             continue;
           }
           baselineOffset = offset;
+          retryCount = 0;
         } else {
           // Sweeps 1-N: must be within ±2 samples of baseline.
           if ((offset - baselineOffset).abs() > 2) {
             // Misaligned sweep — discard and retry.
+            retryCount++;
+            if (retryCount >= maxRetries) {
+              engine.processingFailed();
+              return;
+            }
             pass++;
             continue;
           }
+          retryCount = 0;
         }
 
         captures.add(capture);
